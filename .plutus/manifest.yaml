@@ -1,0 +1,102 @@
+schema_version: "2.0"
+
+repo:
+  name: project5-hypothesis
+  primary_language: python
+
+env:
+  base: python
+  python_version: "3.10"
+  requirements_file: requirements.txt
+  os_packages: []
+
+# DB-backed (Tier 3): credentials injected as env vars into the data_collection
+# steps. No secrets are committed. Every id in used_by must exist in steps[].id.
+secrets:
+  - key: HOST
+    purpose: Database host
+    used_by: [futures, membership, basket]
+  - key: PORT
+    purpose: Database port
+    used_by: [futures, membership, basket]
+  - key: DATABASE
+    purpose: Database name
+    used_by: [futures, membership, basket]
+  - key: USER_DB
+    purpose: Database user
+    used_by: [futures, membership, basket]
+  - key: PASSWORD
+    purpose: Database password
+    used_by: [futures, membership, basket]
+
+data_sources:
+  raw: []
+  processed: []
+
+steps:
+  - id: futures
+    nine_step: step_2_data_collection
+    required: true
+    label: "Download the continuous VN30F front-month series + VN30 index"
+    command: "python scripts/download_data.py --query-file sql/vn30f_frontmonth.sql --output data/raw/vn30f_frontmonth.parquet"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs: []
+    outputs:
+      - data/raw/vn30f_frontmonth.parquet
+    depends_on: []
+
+  - id: membership
+    nine_step: step_2_data_collection
+    required: true
+    label: "Download VN30 membership snapshots for the hedge basket"
+    command: "python scripts/download_data.py --query-file sql/vn30_membership.sql --output data/raw/vn30_membership.parquet"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 600
+    inputs: []
+    outputs:
+      - data/raw/vn30_membership.parquet
+    depends_on: []
+
+  - id: basket
+    nine_step: step_2_data_collection
+    required: true
+    label: "Download adjusted close + volume for every VN30 member ever"
+    command: "python scripts/download_data.py --query-file sql/basket_prices.sql --output data/raw/vn30_basket_prices.parquet"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs: []
+    outputs:
+      - data/raw/vn30_basket_prices.parquet
+    depends_on: []
+
+  - id: backtest
+    nine_step: step_5_optimization
+    required: true
+    label: "Basis backtest: long VN30 basket / short VN30F1M, with costs, T+2 and margin sim"
+    command: "python scripts/basis_backtest.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/basis"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/basis/trades.csv
+      - result/basis/summary.csv
+      - result/basis/cost_curve.csv
+      - result/basis/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+nine_step_coverage:
+  step_1_hypothesis:       {present: true,  section: "Hypothesis"}
+  step_2_data_collection:  {present: true,  section: "Pipeline"}
+  step_3_data_processing:  {present: true,  section: "Pipeline"}
+  step_4_in_sample:        {present: true,  section: "Backtest"}
+  step_5_optimization:     {present: true,  section: "The sweep"}
+  step_6_out_of_sample:    {present: false, section: null}
+  step_7_paper_trading:    {present: false, section: null}
