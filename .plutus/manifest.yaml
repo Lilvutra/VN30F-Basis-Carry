@@ -15,19 +15,19 @@ env:
 secrets:
   - key: HOST
     purpose: Database host
-    used_by: [futures, membership, basket]
+    used_by: [futures, membership, basket, intraday_check, capacity]
   - key: PORT
     purpose: Database port
-    used_by: [futures, membership, basket]
+    used_by: [futures, membership, basket, intraday_check, capacity]
   - key: DATABASE
     purpose: Database name
-    used_by: [futures, membership, basket]
+    used_by: [futures, membership, basket, intraday_check, capacity]
   - key: USER_DB
     purpose: Database user
-    used_by: [futures, membership, basket]
+    used_by: [futures, membership, basket, intraday_check, capacity]
   - key: PASSWORD
     purpose: Database password
-    used_by: [futures, membership, basket]
+    used_by: [futures, membership, basket, intraday_check, capacity]
 
 data_sources:
   raw: []
@@ -37,7 +37,7 @@ steps:
   - id: futures
     nine_step: step_2_data_collection
     required: true
-    label: "Download the continuous VN30F front-month series + VN30 index"
+    label: "Download the continuous VN30F front-month series + VN30 index, incl. 09:15 opens"
     command: "python scripts/download_data.py --query-file sql/vn30f_frontmonth.sql --output data/raw/vn30f_frontmonth.parquet"
     network: bridge
     verification_mode: execute
@@ -63,7 +63,7 @@ steps:
   - id: basket
     nine_step: step_2_data_collection
     required: true
-    label: "Download adjusted close + volume for every VN30 member ever"
+    label: "Download adjusted + raw close and volume for every VN30 member ever, VN30 and E1VFVN30"
     command: "python scripts/download_data.py --query-file sql/basket_prices.sql --output data/raw/vn30_basket_prices.parquet"
     network: bridge
     verification_mode: execute
@@ -74,7 +74,7 @@ steps:
     depends_on: []
 
   - id: backtest
-    nine_step: step_5_optimization
+    nine_step: step_4_in_sample
     required: true
     label: "Basis backtest: long VN30 basket / short VN30F1M, with costs, T+2 and margin sim"
     command: "python scripts/basis_backtest.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/basis"
@@ -92,11 +92,114 @@ steps:
       - result/basis/FINDINGS.md
     depends_on: [futures, membership, basket]
 
+  - id: backtest_fit
+    nine_step: step_4_in_sample
+    required: true
+    label: "Same backtest with a regressed-weight (fit) hedge basket"
+    command: "python scripts/basis_backtest.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --basket-mode fit --outdir result/basis_fit"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/basis_fit/trades.csv
+      - result/basis_fit/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+  - id: tracking
+    nine_step: step_3_data_processing
+    required: true
+    label: "Tracking gap of equal / fit / ETF hedge baskets vs VN30 over every 5-session window"
+    command: "python scripts/tracking_error.py --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/tracking"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs:
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/tracking/tracking_error.csv
+      - result/tracking/summary.csv
+    depends_on: [basket]
+
+  - id: walkforward
+    nine_step: step_5_optimization
+    required: true
+    label: "Anchored yearly walk-forward + 2025 split over entry × exit × basket grid"
+    command: "python scripts/walk_forward.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/walkforward"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/walkforward/folds.csv
+      - result/walkforward/oos_trades.csv
+      - result/walkforward/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+  - id: walkforward_cost_nextopen
+    nine_step: step_6_out_of_sample
+    required: true
+    label: "Walk-forward of the cost-relative entry buffer, filled at the next 09:15 open"
+    command: "python scripts/walk_forward.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --entry-rule cost --execution next_open --modes fit --exits 3 --entries=-4,-2,0,2,4,6,8 --outdir result/walkforward_cost_next_open"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 1800
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/walkforward_cost_next_open/folds.csv
+      - result/walkforward_cost_next_open/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+  - id: intraday_check
+    nine_step: step_6_out_of_sample
+    required: false
+    label: "Intraday step 1: displayed vs capturable (bid/ask) basis at triggers, held to expiry"
+    command: "python scripts/intraday_check.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/intraday"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 3600
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - data/raw/intraday_basis_minute.parquet
+      - result/intraday/events.csv
+      - result/intraday/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+  - id: capacity
+    nine_step: step_6_out_of_sample
+    required: false
+    label: "Capacity: partial fills from the top-3 book at each fund buffer-3 trigger, P&L and capital by target size"
+    command: "python scripts/capacity.py --events result/intraday_fund_buffer3/events.csv --outdir result/capacity"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 3600
+    inputs:
+      - result/intraday_fund_buffer3/events.csv
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+    outputs:
+      - result/capacity/capacity.csv
+      - result/capacity/FINDINGS.md
+    depends_on: [intraday_check]
+
 nine_step_coverage:
   step_1_hypothesis:       {present: true,  section: "Hypothesis"}
   step_2_data_collection:  {present: true,  section: "Pipeline"}
-  step_3_data_processing:  {present: true,  section: "Pipeline"}
-  step_4_in_sample:        {present: true,  section: "Backtest"}
-  step_5_optimization:     {present: true,  section: "The sweep"}
-  step_6_out_of_sample:    {present: false, section: null}
+  step_3_data_processing:  {present: true,  section: "The tracking gap on every 5-session window"}
+  step_4_in_sample:        {present: true,  section: "Result (2021-06 → 2026-10)"}
+  step_5_optimization:     {present: true,  section: "Walk-forward"}
+  step_6_out_of_sample:    {present: true,  section: "Cost-relative entry + next-open execution"}
   step_7_paper_trading:    {present: false, section: null}
