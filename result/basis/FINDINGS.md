@@ -1,6 +1,6 @@
 # Long VN30 basket / short VN30F1M — basis convergence backtest
 
-Window 2021-06 → 2026-10. Front-month roll via futurecode='VN30F1M'. Basket = equal-weight VN30 members (latest snapshot), adjusted closes. Costs: stock 12bps/side + 10bps sell tax + futures 3bps + slippage 15bps (≈ 11.4 index points/trade).
+Window 2021-06 → 2026-10. Front-month roll via futurecode='VN30F1M'. Basket = equal-weight VN30 members (latest snapshot), adjusted closes. Costs: stock 12bps/side + 10bps sell tax + futures 3bps + slippage 15bps (≈ 11.5 index points/trade).
 
 Basis is negative most of the time (median ≈ −1.3 pts); a +10 entry is a rare event, so trade counts are small by construction.
 
@@ -8,15 +8,23 @@ Basis is negative most of the time (median ≈ −1.3 pts); a +10 entry is a rar
 
 | n trades | win rate | avg gross (pts) | avg cost (pts) | avg net (pts) | total net (pts) | total net (VND) | Sharpe | max DD (VND) | margin calls | forced |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 11 | 0.45 | 8.45 | 11.35 | -2.90 | -32.0 | -3,195,368 | -1.21 | -4,536,824 | 0 | 0 |
+| 12 | 0.42 | 8.00 | 11.51 | -3.50 | -42.0 | -4,200,546 | -1.52 | -5,542,001 | 0 | 0 |
+
+## Where the gross comes from
+
+gross = basis captured (entry basis − exit basis) + tracking (basket − VN30 over the holding period). Only the first part is the strategy; the second is an unintended bet that the hedge basket beats the index.
+
+| avg basis (pts) | avg tracking (pts) | tracking std (pts) | avg cost (pts) | avg net if tracking were 0 (pts) |
+|---|---|---|---|---|
+| 14.38 | -6.38 | 14.18 | 11.51 | +2.87 |
 
 ## Entry-threshold sweep (the cost curve)
 
 | entry basis | n trades | win rate | avg gross (pts) | avg net (pts) | total net (pts) | total net (VND) |
 |---|---|---|---|---|---|---|
-| 6 | 28 | 0.25 | 7.10 | -4.47 | -125.0 | -12,503,217 |
-| 8 | 12 | 0.25 | 5.99 | -5.41 | -64.9 | -6,492,586 |
-| 10 | 11 | 0.45 | 8.45 | -2.90 | -32.0 | -3,195,368 |
+| 6 | 29 | 0.21 | 5.50 | -6.12 | -177.4 | -17,744,394 |
+| 8 | 13 | 0.23 | 5.77 | -5.77 | -75.0 | -7,497,764 |
+| 10 | 12 | 0.42 | 8.00 | -3.50 | -42.0 | -4,200,546 |
 | 12 | 4 | 0.50 | 9.00 | -3.89 | -15.5 | -1,554,237 |
 | 14 | 2 | 0.00 | -3.21 | -17.26 | -34.5 | -3,451,567 |
 | 16 | 1 | 0.00 | -15.73 | -29.64 | -29.6 | -2,964,397 |
@@ -27,14 +35,14 @@ Gross convergence is held fixed; only the assumed ROUND-TRIP cost in bps of noti
 
 | round-trip cost (bps) | n trades | avg net (pts) | total net (VND) |
 |---|---|---|---|
-| 20 | 11 | +5.21 | 5,726,017 |
-| 30 | 11 | +3.58 | 3,941,740 |
-| 40 | 11 | +1.96 | 2,157,463 |
-| 50 | 11 | +0.34 | 373,186 |
-| 60 | 11 | -1.28 | -1,411,091 |
-| 70 | 11 | -2.90 | -3,195,368 |
-| 80 | 11 | -4.53 | -4,979,645 |
-| 90 | 11 | -6.15 | -6,763,922 |
+| 20 | 12 | +4.72 | 5,661,124 |
+| 30 | 12 | +3.07 | 3,688,790 |
+| 40 | 12 | +1.43 | 1,716,456 |
+| 50 | 12 | -0.21 | -255,878 |
+| 60 | 12 | -1.86 | -2,228,212 |
+| 70 | 12 | -3.50 | -4,200,546 |
+| 80 | 12 | -5.14 | -6,172,880 |
+| 90 | 12 | -6.79 | -8,145,214 |
 
 ## Reading this
 
