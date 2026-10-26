@@ -13,6 +13,11 @@
 -- the VN30 index level (basis = fut_close - vn30_index) and the contract expiry
 -- (so days-to-expiry, and therefore the expected convergence, can be computed).
 --
+-- Next-open execution: VN30 `open` is the 09:15 ATO index level, but the futures
+-- daily `open` is the 08:45 print, taken while the index is still at yesterday's
+-- close. So the futures leg uses `fut_open915` = the first matched trade at or
+-- after 09:15:00, the same moment the stock/index ATO prints.
+--
 -- History starts 2021-06 (first date the rank codes exist). The join to
 -- quote.close on the same date drops the placeholder 2030 rows in the mapping table.
 SELECT
@@ -22,6 +27,8 @@ SELECT
     s.price::double precision    AS fut_settle,
     o.quantity                   AS open_interest,
     i.price::double precision    AS vn30_index,
+    io.price::double precision   AS vn30_open,
+    fo.price::double precision   AS fut_open915,
     t.expdate                    AS expdate
 FROM quote.futurecontractcode f
 JOIN quote.ticker t
@@ -34,6 +41,17 @@ LEFT JOIN quote.settlementprice s
   ON s.tickersymbol = f.tickersymbol AND s.datetime = f.datetime
 LEFT JOIN quote.oi o
   ON o.tickersymbol = f.tickersymbol AND o.datetime = f.datetime
+LEFT JOIN quote.open io
+  ON io.tickersymbol = 'VN30' AND io.datetime = f.datetime
+LEFT JOIN LATERAL (
+    SELECT m.price
+    FROM quote.matched m
+    WHERE m.tickersymbol = f.tickersymbol
+      AND m.datetime >= f.datetime + time '09:15:00'
+      AND m.datetime <  f.datetime + time '11:30:00'
+    ORDER BY m.datetime
+    LIMIT 1
+) fo ON true
 WHERE f.futurecode = 'VN30F1M'
   AND f.datetime >= date '2021-06-01'
 ORDER BY f.datetime;
