@@ -1,7 +1,6 @@
-# project5 — long VN30 basket / short VN30F1M (basis convergence)
+# Cash-and-Carry Arbitrage — long VN30 basket / short VN30F1M (basis convergence)
 
-A plutus-style quant hypothesis project, DB-backed (`algotradeDB`, same conventions as
-project2–4). It tests a **cash-and-carry basis trade**: when the VN30 front-month future
+It tests a **cash-and-carry basis trade**: when the VN30 front-month future
 (`VN30F1M`) trades rich versus the VN30 index, buy a basket of stocks that tracks VN30
 and short the future, then hold until expiry, when the basis is forced to zero.
 
