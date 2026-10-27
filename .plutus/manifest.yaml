@@ -15,19 +15,19 @@ env:
 secrets:
   - key: HOST
     purpose: Database host
-    used_by: [futures, membership, basket, intraday_check, capacity]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
   - key: PORT
     purpose: Database port
-    used_by: [futures, membership, basket, intraday_check, capacity]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
   - key: DATABASE
     purpose: Database name
-    used_by: [futures, membership, basket, intraday_check, capacity]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
   - key: USER_DB
     purpose: Database user
-    used_by: [futures, membership, basket, intraday_check, capacity]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
   - key: PASSWORD
     purpose: Database password
-    used_by: [futures, membership, basket, intraday_check, capacity]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
 
 data_sources:
   raw: []
@@ -195,11 +195,47 @@ steps:
       - result/capacity/FINDINGS.md
     depends_on: [intraday_check]
 
+  - id: walkforward_intraday
+    nine_step: step_6_out_of_sample
+    required: false
+    label: "Steps 5–6 for the intraday rule: buffer × vol-cap walk-forward, trades held to expiry with tracking and margin"
+    command: "python scripts/walk_forward_intraday.py --outdir result/walkforward_intraday"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 3600
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+      - data/raw/intraday_basis_minute.parquet
+    outputs:
+      - result/walkforward_intraday/folds.csv
+      - result/walkforward_intraday/oos_trades.csv
+      - result/walkforward_intraday/FINDINGS.md
+    depends_on: [futures, membership, basket]
+
+  - id: figures
+    nine_step: step_6_out_of_sample
+    required: false
+    label: "README figures from data/raw and result/"
+    command: "python scripts/make_figures.py"
+    network: none
+    verification_mode: execute
+    timeout_seconds: 600
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - result/walkforward_intraday/oos_trades.csv
+      - result/capacity/fills.csv
+    outputs:
+      - figures/01_basis_history.png
+      - figures/07_oos_trades.png
+    depends_on: [walkforward_intraday, capacity, tracking, backtest_fit]
+
 nine_step_coverage:
-  step_1_hypothesis:       {present: true,  section: "Hypothesis"}
-  step_2_data_collection:  {present: true,  section: "Pipeline"}
-  step_3_data_processing:  {present: true,  section: "The tracking gap on every 5-session window"}
-  step_4_in_sample:        {present: true,  section: "Result (2021-06 → 2026-10)"}
-  step_5_optimization:     {present: true,  section: "Walk-forward"}
-  step_6_out_of_sample:    {present: true,  section: "Cost-relative entry + next-open execution"}
-  step_7_paper_trading:    {present: false, section: null}
+  step_1_hypothesis:       {present: true,  section: "Step 1 — Hypothesis"}
+  step_2_data_collection:  {present: true,  section: "Step 2 — Data collection"}
+  step_3_data_processing:  {present: true,  section: "Step 3 — Data processing: the hedge basket"}
+  step_4_in_sample:        {present: true,  section: "Step 4 — In-sample backtest"}
+  step_5_optimization:     {present: true,  section: "Step 5 — Optimization"}
+  step_6_out_of_sample:    {present: true,  section: "Step 6 — Out-of-sample"}
+  step_7_paper_trading:    {present: false, section: "Steps 7–9 — not started"}
