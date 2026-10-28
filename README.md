@@ -10,9 +10,9 @@ and short the future, then hold until expiry, when the basis is forced to zero.
 |---|---|
 | Does the basis converge? | Yes, by construction: the future settles at the VN30 close on expiry day. |
 | Is the daily-close version tradeable? | **No.** It only made money when it filled at the same close that produced the signal. At the next 09:15 open the captured basis falls from 14.4 to 3.9 pts, and walk-forward OOS is −94 pts. |
-| Is the intraday version tradeable? | **At fund costs, yes, but it is small.** With 17 bps fees, 4.5% carry and a 3-pt buffer, out of sample (2022–2026, 21 trades) the edge is **+1.75 pts/trade at a 60 s fill (t 4.7), +2.12 at 5 s (t 7.0)**. Buffer 3 is picked in every walk-forward fold. At retail fees (40 bps) it loses. |
+| Is the intraday version tradeable? | **At fund costs, yes, but it is small.** With 17 bps fees, 4.5% carry and a 3-pt buffer, out of sample (2022–2026, 22 trades) the edge is **+1.72 pts/trade at a 60 s fill (t 4.9), +2.06 at 5 s (t 6.9)**. Buffer 3 is picked in every walk-forward fold. At retail fees (40 bps) it loses. |
 | How big? | The futures bid caps it at ~10–30 contracts per trade and ~4–5 trades a year: **≈ 9m VND/yr on ≈ 2.4bn (≈ 0.4%/yr above carry)** at 10 contracts; ≈ 33m on 24bn (0.14%) at 100. |
-| Biggest risk | The hedge basket drifting from VN30 until expiry: ±17 pts std per trade, ~10× the edge. It was positive in the sample (+7.6/trade), but that came from a few names (VHM, VCB, PLX), so it is treated as luck. |
+| Biggest risk | The hedge basket drifting from VN30 until expiry: ±17 pts std per trade, ~10× the edge. It was positive in the sample (+6.8/trade), but that came from a few names (VHM, VCB, PLX), so it is treated as luck. |
 | Verdict | A real but tiny, capacity-bound edge. Not worth running as a standalone strategy. Step 7 (paper trading) only makes sense with the **official VN30 weights** for the basket. |
 
 ## The intuition in one paragraph
@@ -94,7 +94,7 @@ Data facts that shaped the design:
 *Daily closing basis since 2021-06. The future usually trades at a **discount** (median
 −1.3 pts); only ~2% of days close at +8 or more. The orange line is the fund-cost bar (17
 bps + 4.5% carry), which saw-tooths down into each expiry as carry runs off. The dashed
-line is the entry line (bar + 3). Green dots are the 21 out-of-sample intraday entries.*
+line is the entry line (bar + 3). Green dots are the 22 out-of-sample intraday entries (each contract's first trigger, at its intraday basis).*
 
 ## Step 3 — Data processing: the hedge basket
 
@@ -240,30 +240,30 @@ while the basket is sold at each name's close, with dividends via adjusted/raw c
 | 2023 | buffer 3, no filter | 2 | +11.4 | +5.68 | +1.02 | +4.65 |
 | 2024 | buffer 3, no filter | 5 | +19.4 | +3.88 | +2.09 | +1.79 |
 | 2025 | buffer 3, no filter | 6 | +77.7 | +12.96 | +1.85 | +11.11 |
-| 2026 | buffer 3, no filter | 6 | +79.9 | +13.32 | +0.85 | +12.46 |
+| 2026 | buffer 3, no filter | 7 | +70.7 | +10.09 | +0.89 | +9.20 |
 
-**Stitched OOS: 21 trades, +197 pts, mean +9.39, t +2.43, 76% positive.**
+**Stitched OOS: 22 trades, +188 pts, mean +8.54, t +2.26, 73% positive.**
 
 ![oos trades](figures/07_oos_trades.png)
 
 - **Buffer 3 is picked in every fold**; the volatility filter never is. The one tuned
   parameter is stable out of sample.
-- The **edge** is the strategy: +1.75 pts/trade, t +4.7, 86% positive. It matches step 4.
-- The **tracking** part (+7.6/trade, std 17.6) is not market beta (correlation with the
+- The **edge** is the strategy: +1.72 pts/trade, t +4.9, 86% positive. It matches step 4.
+- The **tracking** part (+6.8/trade, std 17.6) is not market beta (correlation with the
   VN30 move −0.03). It comes from a few names in which fit was overweight: VHM (10–13%),
-  VCB and PLX drive 2025-12 (+58) and 2026-03 (+42), and 2026-04 lost −24 the same way.
+  VCB and PLX drive 2025-12 (+58) and 2026-03 (+42), while 2026-01 (−10) and 2026-04 (−24) lost the same way.
   It is luck, not an edge, and it should not be planned on. Without the two largest
-  trades the mean is +4.9 (t 2.0).
-- Margin: the short future needed on average 34 pts of top-up, at most 173 pts
+  trades the mean is +4.2 (t 1.7).
+- Margin: the short future needed on average 33 pts of top-up, at most 173 pts
   (17.3m VND per contract, ~9% of notional). A 20% cash reserve covers it.
 
 **Fill delay** (`--delay`, separate fills cache per delay). Buffer 3 is picked in every fold at every delay:
 
 | delay | OOS trades | edge/trade | edge t | edge > 0 | net/trade | net t |
 |---|---|---|---|---|---|---|
-| 5 s | 21 | **+2.12** | +7.0 | 90% | +9.91 | +2.62 |
-| 30 s | 21 | +1.92 | +6.6 | 100% | +9.58 | +2.49 |
-| 60 s | 21 | +1.75 | +4.7 | 86% | +9.39 | +2.43 |
+| 5 s | 22 | **+2.06** | +6.9 | 91% | +9.02 | +2.43 |
+| 30 s | 22 | +1.86 | +6.6 | 100% | +8.71 | +2.31 |
+| 60 s | 22 | +1.72 | +4.9 | 86% | +8.54 | +2.26 |
 
 A 5 s fill needs an automated basket order and competes with prop desks. The signal is
 still the minute's last print, so a tick-level trigger could be faster again.
@@ -308,7 +308,7 @@ expiries with triggers (≈ 6 months). Live trading would start at 1–2 contrac
 ## Verdict
 
 Basis convergence is real, but the daily-close version is an artefact of the
-same-close fill. The intraday version earns **+1.75–2.1 pts per trade out of sample
+same-close fill. The intraday version earns **+1.7–2.1 pts per trade out of sample
 at fund costs** with a buffer chosen in advance. That is a genuine edge, but the futures
 book caps it at roughly 10–30 contracts and ~4–5 trades a year, ≈ 0.1–0.4% a year on
 the capital, with per-trade tracking noise ten times larger. It is worth running only as
@@ -380,7 +380,11 @@ python scripts/make_figures.py
 - Signals use the last print of each minute; fills use the top 3 book levels at one
   instant. No market impact beyond the visible book, no order slicing.
 - Settlement uses the VN30 close on expiry day; check the current HNX rule.
-- Few trades: 21 OOS trades, 2–6 per fold. The edge's t-stat is solid; the net's is not.
+- Few trades: 22 OOS trades, 2–7 per fold. The edge's t-stat is solid; the net's is not.
+- Expiry on a holiday: VN30F2602 (Tet, 2026-02-19) and VN30F2404 (Hung Kings, 2024-04-18)
+  settle on the contract's last trading day. The first version of
+  `walk_forward_intraday.py` treated them as unexpired and dropped the VN30F2602 trade
+  (2026-01-28, net −9.2); the tables above include it.
 - Fix in an earlier revision: an expiry exit used to settle the future at the *entry*
   index level instead of the expiry-day index (the +6 sweep row changed from −12.5m to
   −17.7m VND).

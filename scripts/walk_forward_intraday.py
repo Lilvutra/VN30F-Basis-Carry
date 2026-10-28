@@ -116,6 +116,13 @@ def main() -> None:
 
     fut = load_futures(args.futures)
     expiry = fut.groupby("contract")["expdate"].first()
+    # an expiry on a holiday (Tet 2026-02-19, Hung Kings 2024-04-18) settles on the
+    # contract's last trading day instead
+    last_day = fut.groupby("contract")["date"].max()
+    trading = set(fut["date"])
+    expiry = pd.Series({c: d if (d in trading or d > fut["date"].max()) else last_day[c]
+                        for c, d in expiry.items()})
+    fut = fut.assign(expdate=fut["contract"].map(expiry))
     adj, _, raw, _ = load_basket(args.basket)
     snaps = load_members(args.membership)
     daily = fut.drop_duplicates("date").set_index("date")["vn30_index"].sort_index()
