@@ -6,10 +6,13 @@ buffer of 3, but that buffer was picked after seeing the whole sample, and the
 edge (exec − bar) treated the basket's tracking until expiry as zero. Here:
 
   1. triggers for every buffer in --buffers: the first session minute of a day with
-        displayed basis − bar ≥ buffer, dte ≥ --min-days-expiry,
+        displayed basis − bar ≥ buffer, dte ≥ --min-days-expiry (default 0: up to
+        and including expiry day), signal minute ≤ --last-signal if set,
         bar = VN30 × (fee_bps/1e4 + rate × dte/365);
      optional volatility filter: trailing 20-session VN30 vol (annualised, known
-     before the day) below a cap in --vol-caps (0 = no filter);
+     before the day) below a cap in --vol-caps (0 = no filter); --late-vol-cap puts
+     a cap only on entries with dte < --late-days; --max-fut-spread skips fills
+     whose futures spread is wider (all off by default: none helped, see README);
   2. one position per contract: the first trigger of the contract that passes;
   3. each trade's full lifecycle, 1 contract:
         entry  --delay s after the signal: sell the future at its best bid, buy the
@@ -27,8 +30,9 @@ edge (exec − bar) treated the basket's tracking until expiry as zero. Here:
      the highest total net in all earlier data (≥ --min-trades trades), trade the
      test year with it. Fixed combos are reported for comparison only.
 
-Outputs (--outdir, default result/walkforward_intraday/):
-  fills.parquet  cached fills + lifecycle per trigger minute (reused across runs)
+Outputs (--outdir, default result/walkforward_intraday_expiry/):
+  --fills-cache  cached fills + lifecycle per trigger minute, one file per delay
+                 (default data/raw/wfi_fills_delay{delay}.parquet, reused across runs)
   trades.csv     every combo's trades
   grid.csv       every combo, per year
   folds.csv      the pick per test year and its OOS result
@@ -36,7 +40,9 @@ Outputs (--outdir, default result/walkforward_intraday/):
   FINDINGS.md
 
 Usage:
-    python scripts/walk_forward_intraday.py   # fund fees 17 bps, rate 4.5 %
+    python scripts/walk_forward_intraday.py   # adopted rule: 5 s fill, entries up to expiry day
+    python scripts/walk_forward_intraday.py --delay 60 --min-days-expiry 7 \
+        --outdir result/walkforward_intraday  # the first rule: 60 s, ≥ 7 days to expiry
 """
 from __future__ import annotations
 
@@ -95,14 +101,23 @@ def main() -> None:
     ap.add_argument("--membership", type=Path, default=Path("data/raw/vn30_membership.parquet"))
     ap.add_argument("--minute-sql", type=Path, default=Path("sql/intraday_basis_minute.sql"))
     ap.add_argument("--minute-cache", type=Path, default=Path("data/raw/intraday_basis_minute.parquet"))
-    ap.add_argument("--fills-cache", type=Path, default=Path("data/raw/walkforward_intraday_fills.parquet"))
-    ap.add_argument("--outdir", type=Path, default=Path("result/walkforward_intraday"))
+    ap.add_argument("--fills-cache", type=Path, default=None,
+                    help="default data/raw/wfi_fills_delay{delay}.parquet")
+    ap.add_argument("--outdir", type=Path, default=Path("result/walkforward_intraday_expiry"))
     ap.add_argument("--fee-bps", type=float, default=17.0)
     ap.add_argument("--rate", type=float, default=0.045)
     ap.add_argument("--buffers", default="0,1,2,3,4,5")
     ap.add_argument("--vol-caps", default="0,25,20", help="annualised %%; 0 = no filter.")
-    ap.add_argument("--min-days-expiry", type=int, default=7)
-    ap.add_argument("--delay", type=int, default=60)
+    ap.add_argument("--min-days-expiry", type=int, default=0)
+    ap.add_argument("--late-vol-cap", type=float, default=0,
+                    help="annualised %%; with --min-days-expiry below --late-days, an entry with "
+                         "dte < --late-days also needs vol20 below this (0 = no extra check).")
+    ap.add_argument("--late-days", type=int, default=7)
+    ap.add_argument("--last-signal", default="",
+                    help="HH:MM; ignore signal minutes after this time of day (empty = none).")
+    ap.add_argument("--max-fut-spread", type=float, default=0,
+                    help="index points; skip a fill whose futures spread is wider (0 = no filter).")
+    ap.add_argument("--delay", type=int, default=5)
     ap.add_argument("--fit-window", type=int, default=120)
     ap.add_argument("--max-quote-gap", type=float, default=0.03)
     ap.add_argument("--min-quoted", type=float, default=0.9)
@@ -110,6 +125,8 @@ def main() -> None:
     ap.add_argument("--test-years", default="2022,2023,2024,2025,2026")
     ap.add_argument("--multiplier", type=float, default=100000.0)
     args = ap.parse_args()
+    if args.fills_cache is None:
+        args.fills_cache = Path(f"data/raw/wfi_fills_delay{args.delay}.parquet")
     buffers = [float(x) for x in args.buffers.split(",")]
     caps = [float(x) for x in args.vol_caps.split(",")]
     test_years = [int(x) for x in args.test_years.split(",")]
@@ -138,6 +155,8 @@ def main() -> None:
     m["disp"] = m["fut_last"] - m["vn30"]
     m["bar"] = m["vn30"] * (args.fee_bps / 1e4 + args.rate * m["dte"] / 365)
     m = m[m["dte"] >= args.min_days_expiry]
+    if args.last_signal:
+        m = m[m["minute"].dt.time <= pd.Timestamp(args.last_signal).time()]
     trig = {b: m[m["disp"] - m["bar"] >= b].groupby("date").head(1) for b in buffers}
     need = pd.concat(trig.values()).drop_duplicates("minute")
 
@@ -170,6 +189,10 @@ def main() -> None:
     f["valid"] = (f["fill_in_session"] & (f["fut_spread"] > 0)
                   & (f["weight_quoted"] >= args.min_quoted) & f["exec"].notna())
     f["vol20"] = pd.to_datetime(f["date"]).map(vol20)
+    if args.max_fut_spread > 0:
+        f["valid"] &= f["fut_spread"] <= args.max_fut_spread
+    if args.late_vol_cap > 0:
+        f["valid"] &= (f["dte"] >= args.late_days) | (f["vol20"] < args.late_vol_cap)
 
     trades = []
     for b in buffers:
@@ -219,7 +242,11 @@ def main() -> None:
         "# Walk-forward of the intraday arbitrage rule (steps 5–6)", "",
         f"Fees {args.fee_bps:g} bps round trip, carry rate {args.rate:.1%}, fill {args.delay} s after the "
         f"signal at bid/ask, 1 contract, one position per contract, held to expiry (future at the "
-        f"VN30 close, basket at its closes, dividends in). net = cash − carry; track = net − (exec − bar).",
+        f"VN30 close, basket at its closes, dividends in). Entries need ≥ {args.min_days_expiry} days to expiry"
+        + (f", signals up to {args.last_signal}" if args.last_signal else "")
+        + (f", futures spread ≤ {args.max_fut_spread:g}" if args.max_fut_spread else "")
+        + (f", vol20 < {args.late_vol_cap:g}% when dte < {args.late_days}" if args.late_vol_cap else "")
+        + ". net = cash − carry; track = net − (exec − bar).",
         "", "## Out-of-sample (anchored yearly; pick = best total net in all earlier years)", "",
         "| test year | buffer | vol cap | train trades | test trades | test total | mean | edge | track |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -240,6 +267,12 @@ def main() -> None:
         f"Margin top-up on the short future: mean {oos['margin_topup'].mean():.1f} pts, "
         f"max {oos['margin_topup'].max():.1f} pts ({oos['margin_topup'].max() * vnd:.1f}m VND per contract)."
         if len(oos) else "",
+        "", "## OOS trades by days to expiry at entry", "",
+        "| days to expiry | trades | total | mean | edge | track |", "|---|---|---|---|---|---|",
+        *[f"| {k} | {len(g)} | {g['net'].sum():+.1f} | {g['net'].mean():+.2f} | {g['edge'].mean():+.2f} "
+          f"| {g['track'].mean():+.2f} |"
+          for k, g in oos.groupby(pd.cut(oos["dte"], [-1, 0, 6, 10_000],
+                                         labels=["0 (expiry day)", "1–6", "≥ 7"]), observed=True)],
         "", f"Open (unexpired) trades excluded: {int(trades['net'].isna().sum())} combo-rows.",
     ]
     (args.outdir / "FINDINGS.md").write_text("\n".join(lines) + "\n")

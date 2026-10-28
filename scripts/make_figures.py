@@ -6,8 +6,8 @@
   figures/03_close_vs_nextopen.png basis captured: same-close fill vs next-open fill
   figures/04_waterfall.png         displayed → capturable basis → edge, intraday triggers
   figures/05_edge_vs_delay.png     edge by fill delay, buffer 0 vs 3
-  figures/06_buffer_grid.png       whole-sample net/edge by buffer (comparison only)
-  figures/07_oos_trades.png        out-of-sample trades: edge + tracking, cumulative net
+  figures/06_buffer_grid.png       whole-sample net/edge by buffer (comparison only), adopted rule
+  figures/07_oos_trades.png        out-of-sample trades of the adopted rule (5 s, up to expiry day)
   figures/08_capacity.png          fill rate by size, P&L and return by target size
 
 Usage:  python scripts/make_figures.py
@@ -39,7 +39,7 @@ def basis_history(R: Path, D: Path, out: Path, fee_bps: float, rate: float) -> N
     f = f.drop_duplicates("date").sort_values("date")
     basis = f["fut_close"] - f["vn30_index"]
     bar = f["vn30_index"] * (fee_bps / 1e4 + rate * (f["expdate"] - f["date"]).dt.days / 365)
-    o = pd.read_csv(R / "walkforward_intraday" / "oos_trades.csv", parse_dates=["date"])
+    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"])
     fig, ax = plt.subplots(figsize=(11, 4))
     ax.plot(f["date"], basis, color=GREY, lw=0.7, label="daily closing basis (future − VN30)")
     ax.plot(f["date"], bar, color=ORANGE, lw=1.2, label=f"cost bar: fees {fee_bps:g} bps + carry {rate:.1%}")
@@ -137,7 +137,7 @@ def edge_vs_delay(R: Path, out: Path) -> None:
 
 
 def buffer_grid(R: Path, out: Path) -> None:
-    t = pd.read_csv(R / "walkforward_intraday" / "trades.csv")
+    t = pd.read_csv(R / "walkforward_intraday_expiry" / "trades.csv")
     t = t[(t["vol_cap"] == 0) & t["net"].notna()]
     g = t.groupby("buffer").agg(n=("net", "size"), net=("net", "mean"), edge=("edge", "mean"),
                                 total=("net", "sum"))
@@ -158,7 +158,7 @@ def buffer_grid(R: Path, out: Path) -> None:
 
 
 def oos_trades(R: Path, out: Path) -> None:
-    o = pd.read_csv(R / "walkforward_intraday" / "oos_trades.csv", parse_dates=["date"]).sort_values("date")
+    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"]).sort_values("date")
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(11, 6), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
     x = np.arange(len(o))
     a1.bar(x, o["edge"], color=BLUE, label=f"edge (mean {o['edge'].mean():+.2f})")

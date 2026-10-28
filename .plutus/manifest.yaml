@@ -198,8 +198,8 @@ steps:
   - id: walkforward_intraday
     nine_step: step_6_out_of_sample
     required: false
-    label: "Steps 5–6 for the intraday rule: buffer × vol-cap walk-forward, trades held to expiry with tracking and margin"
-    command: "python scripts/walk_forward_intraday.py --outdir result/walkforward_intraday"
+    label: "Steps 5–6 for the intraday rule (adopted: 5 s fill, entries up to expiry day): buffer × vol-cap walk-forward, trades held to expiry with tracking and margin"
+    command: "python scripts/walk_forward_intraday.py --outdir result/walkforward_intraday_expiry"
     network: bridge
     verification_mode: execute
     timeout_seconds: 3600
@@ -209,9 +209,9 @@ steps:
       - data/raw/vn30_membership.parquet
       - data/raw/intraday_basis_minute.parquet
     outputs:
-      - result/walkforward_intraday/folds.csv
-      - result/walkforward_intraday/oos_trades.csv
-      - result/walkforward_intraday/FINDINGS.md
+      - result/walkforward_intraday_expiry/folds.csv
+      - result/walkforward_intraday_expiry/oos_trades.csv
+      - result/walkforward_intraday_expiry/FINDINGS.md
     depends_on: [futures, membership, basket]
 
   - id: figures
@@ -224,7 +224,7 @@ steps:
     timeout_seconds: 600
     inputs:
       - data/raw/vn30f_frontmonth.parquet
-      - result/walkforward_intraday/oos_trades.csv
+      - result/walkforward_intraday_expiry/oos_trades.csv
       - result/capacity/fills.csv
     outputs:
       - figures/01_basis_history.png

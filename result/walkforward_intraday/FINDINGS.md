@@ -1,6 +1,6 @@
 # Walk-forward of the intraday arbitrage rule (steps 5–6)
 
-Fees 17 bps round trip, carry rate 4.5%, fill 60 s after the signal at bid/ask, 1 contract, one position per contract, held to expiry (future at the VN30 close, basket at its closes, dividends in). net = cash − carry; track = net − (exec − bar).
+Fees 17 bps round trip, carry rate 4.5%, fill 60 s after the signal at bid/ask, 1 contract, one position per contract, held to expiry (future at the VN30 close, basket at its closes, dividends in). Entries need ≥ 7 days to expiry. net = cash − carry; track = net − (exec − bar).
 
 ## Out-of-sample (anchored yearly; pick = best total net in all earlier years)
 
@@ -40,5 +40,11 @@ Fees 17 bps round trip, carry rate 4.5%, fill 60 s after the signal at bid/ask, 
 ## Lifecycle of the OOS trades
 
 edge (exec − bar) +1.72, tracking until expiry +6.82 (std 17.62), cash +12.04, carry 3.50. Margin top-up on the short future: mean 32.7 pts, max 172.9 pts (17.3m VND per contract).
+
+## OOS trades by days to expiry at entry
+
+| days to expiry | trades | total | mean | edge | track |
+|---|---|---|---|---|---|
+| ≥ 7 | 22 | +187.9 | +8.54 | +1.72 | +6.82 |
 
 Open (unexpired) trades excluded: 6 combo-rows.
