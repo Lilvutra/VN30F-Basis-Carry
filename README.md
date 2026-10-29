@@ -373,11 +373,14 @@ were not used to change the rule, the selection is redone on a fixed protocol:
 
 1. **Candidates, declared up front:** every rule considered in this project. Entries up
    to expiry day or ≥ 7 days; vol cap none / 25% / 20%; vol < 25% only in the last week;
-   futures spread ≤ 0.5; signals up to 14:15. That gives 28 variants × buffers 0–5. The
-   fill delay is an execution assumption, fixed at 5 s; 30 s and 60 s are shown for
+   futures spread ≤ 0.5; signals up to 14:15. That gives 28 variants × buffers 0 → 10
+   pts in 0.5 steps. The buffer range is set by the cost scale (10 pts ≈ the whole bar
+   ~30 days before expiry), not by step 4, which had already found 3 on the whole sample.
+   The fill delay is an execution assumption, fixed at 5 s; 30 s and 60 s are shown for
    comparison.
 2. **Train (2021-06 → 2023-12):** each variant gets the buffer with the best total net
-   (≥ 3 trades). Buffer 3 wins for almost all.
+   (≥ 3 trades), seeing nothing after 2023. Buffer 3 wins for 26 of 28 variants (1 for
+   the other 2), so 3 does not depend on the later years.
 3. **Validation (2024):** the variant with the best validation total wins (ties go to
    fewer filters). The winner is *up to expiry day, signals ≤ 14:15* (8 trades, +31.9).
    The unfiltered rule scored +31.3 and the ≥ 7-day rules +27.4, so this is close to a tie.

@@ -13,7 +13,8 @@ it was run:
         test        2025-01-01 → data end     scored once, nothing changed after
 
   candidates (every rule considered in this project, declared up front)
-        buffer          0, 1, 2, 3, 4, 5 pts            (fitted on train)
+        buffer          0 → 10 pts in 0.5 steps          (fitted on train; the range
+                        is set by the cost scale: 10 pts ≈ the whole bar ~30 days out)
         min days        0 (up to expiry day), 7
         vol cap         none, 25%, 20%                  (all entries)
         late vol cap    none, 25% when dte < 7          (only with min days 0, no vol cap)
@@ -61,7 +62,9 @@ from walk_forward_intraday import fill_and_hold
 PERIODS = {"train": ("2021-06-01", "2023-12-31"),
            "validation": ("2024-01-01", "2024-12-31"),
            "test": ("2025-01-01", "2099-12-31")}
-BUFFERS = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+# 0 → 10 pts in 0.5 steps: 10 pts is about the whole bar ~30 days before expiry, a range set
+# by the cost scale, not by any result (the step-4 exploration had found 3 on the whole sample)
+BUFFERS = [x / 2 for x in range(21)]
 VARIANTS = [dict(min_days=md, vol_cap=vc, late_cap=lc, max_spread=sp, last_signal=ls)
             for md, vc, lc, sp, ls in itertools.product([0, 7], [0, 25, 20], [0, 25], [0, 0.5], ["", "14:15"])
             if not (lc and (md >= 7 or vc))]                  # the late cap is redundant there
@@ -142,17 +145,21 @@ def main() -> None:
         trig[b, md, ls] = set(x.groupby("date").head(1)["minute"])
     need = m[m["minute"].isin(set().union(*trig.values()))].drop_duplicates("minute")
 
-    def fills_for(delay: int) -> pd.DataFrame:
+    def fills_for(delay: int, minutes: pd.DataFrame) -> pd.DataFrame:
         args.delay = delay
         path = Path(f"data/raw/wfi_fills_delay{delay}.parquet")
         cache = pd.read_parquet(path) if path.exists() else pd.DataFrame()
         done = set(pd.to_datetime(cache["minute"])) if len(cache) else set()
-        todo = need[~need["minute"].isin(done)]
-        print(f"[holdout] delay {delay}s: {len(need)} trigger minutes, {len(todo)} to fill", flush=True)
-        rows = [fill_and_hold(r, raw, adj, snaps, fut, args) for r in todo.itertuples()]
+        todo = minutes[~minutes["minute"].isin(done)]
+        print(f"[holdout] delay {delay}s: {len(minutes)} trigger minutes, {len(todo)} to fill", flush=True)
+        rows = []
+        for n, r in enumerate(todo.itertuples(), 1):
+            rows.append(fill_and_hold(r, raw, adj, snaps, fut, args))
+            if n % 25 == 0 or n == len(todo):
+                print(f"[holdout] {n}/{len(todo)}", flush=True)
+                pd.concat([cache, pd.DataFrame(rows)], ignore_index=True).to_parquet(path)
         if rows:
             cache = pd.concat([cache, pd.DataFrame(rows)], ignore_index=True)
-            cache.to_parquet(path)
         f = cache.copy()
         f["minute"] = pd.to_datetime(f["minute"])
         f = f.drop_duplicates("minute").set_index("minute").sort_index()
@@ -194,7 +201,7 @@ def main() -> None:
         return best
 
     delay = args.delay
-    f = fills_for(delay)
+    f = fills_for(delay, need)
     rows = []
     for i, v in enumerate(VARIANTS):
         fit = fit_buffer(f, v, "train")
@@ -216,7 +223,8 @@ def main() -> None:
     ts = stats(test["net"])
     sens = []
     for d in [int(x) for x in args.sens_delays.split(",") if x]:
-        s = stats(period(trades(fills_for(d), v, b_final), "test")["net"])
+        mins = need[need["minute"].isin(trig[b_final, v["min_days"], v["last_signal"]])]
+        s = stats(period(trades(fills_for(d, mins), v, b_final), "test")["net"])
         sens.append((d, s))
 
     # the rule adopted earlier (up to expiry day, buffer 3, no filters) on the same test period

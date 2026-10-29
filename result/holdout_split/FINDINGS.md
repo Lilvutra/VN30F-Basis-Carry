@@ -8,7 +8,7 @@ Fees 17 bps round trip, carry 4.5%, fill 5 s after the signal at bid/ask, 1 cont
 | validation | 2024-01-01 → 2024-12-31 | choose the variant |
 | test | 2025-01-01 → 2026-10-15 (last expiry) | scored once with the frozen rule |
 
-28 variants × 6 buffers declared before the run; 28 had ≥ 3 train trades, 28 also ≥ 3 validation trades.
+28 variants × 21 buffers declared before the run; 28 had ≥ 3 train trades, 28 also ≥ 3 validation trades.
 
 ## Validation: top 10 variants (buffer fitted on train)
 
