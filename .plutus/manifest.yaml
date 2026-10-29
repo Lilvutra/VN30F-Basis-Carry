@@ -15,19 +15,19 @@ env:
 secrets:
   - key: HOST
     purpose: Database host
-    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday, holdout_split]
   - key: PORT
     purpose: Database port
-    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday, holdout_split]
   - key: DATABASE
     purpose: Database name
-    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday, holdout_split]
   - key: USER_DB
     purpose: Database user
-    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday, holdout_split]
   - key: PASSWORD
     purpose: Database password
-    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday]
+    used_by: [futures, membership, basket, intraday_check, capacity, walkforward_intraday, holdout_split]
 
 data_sources:
   raw: []
@@ -214,6 +214,25 @@ steps:
       - result/walkforward_intraday_expiry/FINDINGS.md
     depends_on: [futures, membership, basket]
 
+  - id: holdout_split
+    nine_step: step_6_out_of_sample
+    required: false
+    label: "Train 2021-06→2023 / validation 2024 / test 2025→ split: 28 pre-declared rules, buffer fitted on train, rule chosen on validation, test scored once (5 s; 30/60 s for comparison)"
+    command: "python scripts/holdout_split.py --outdir result/holdout_split"
+    network: bridge
+    verification_mode: execute
+    timeout_seconds: 3600
+    inputs:
+      - data/raw/vn30f_frontmonth.parquet
+      - data/raw/vn30_basket_prices.parquet
+      - data/raw/vn30_membership.parquet
+      - data/raw/intraday_basis_minute.parquet
+    outputs:
+      - result/holdout_split/variants.csv
+      - result/holdout_split/test_trades.csv
+      - result/holdout_split/FINDINGS.md
+    depends_on: [walkforward_intraday]
+
   - id: figures
     nine_step: step_6_out_of_sample
     required: false
@@ -226,11 +245,12 @@ steps:
       - data/raw/vn30f_frontmonth.parquet
       - result/walkforward_intraday_expiry/oos_trades.csv
       - result/capacity_5s/fills.csv
+      - result/holdout_split/test_trades.csv
     outputs:
       - figures/01_basis_history.png
       - figures/07_oos_trades.png
       - figures/09_data_periods.png
-    depends_on: [walkforward_intraday, capacity, tracking, backtest_fit]
+    depends_on: [walkforward_intraday, holdout_split, capacity, tracking, backtest_fit]
 
 nine_step_coverage:
   step_1_hypothesis:       {present: true,  section: "Step 1 — Hypothesis"}

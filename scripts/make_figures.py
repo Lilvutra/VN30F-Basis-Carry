@@ -204,45 +204,48 @@ def capacity(R: Path, out: Path) -> None:
 
 
 def data_periods(R: Path, out: Path) -> None:
-    """Which data each stage saw: warm-up, step-4 exploration, walk-forward folds, paper trading."""
+    """Which data each stage saw: warm-up, step-4 exploration, walk-forward, the train /
+    validation / test split, paper trading."""
     T = pd.Timestamp
     start, end = T("2021-06-01"), T("2026-10-23")
     folds = pd.read_csv(R / "walkforward_intraday_expiry" / "folds.csv")
-    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"])
+    test = pd.read_csv(R / "holdout_split" / "test_trades.csv", parse_dates=["date"])
+    var = pd.read_csv(R / "holdout_split" / "variants.csv")
     rows = []                                        # (label, [(from, to, colour, hatch, text)])
     rows.append(("data", [(T("2020-06-01"), start, GREY, "//", "basket prices only:\n120-session fit warm-up"),
                           (start, T("2023-01-03"), BLUE, "", "minute basis + ticks + book prices"),
                           (T("2023-01-03"), end, BLUE, "", "… + book sizes (capacity)")]))
-    rows.append(("step 4: in-sample\nexploration", [(start, end, GREY, "", "whole sample: buffer 3 found here, so steps 5–6 re-pick it")]))
+    rows.append(("step 4: in-sample\nexploration", [(start, end, GREY, "", "whole sample: buffer 3 found here")]))
+    wf = [(start, T("2022-01-01"), GREY, "", "train\n(grows)")]
     for f in folds.itertuples():
-        y0 = T(f"{f.test_year}-01-01")
-        y1 = min(T(f"{f.test_year}-12-31"), end)
-        is_txt = (f"in-sample: {f.train_n} trades → buffer {f.buffer:g}" if (y0 - start).days > 400
-                  else f"IS: {f.train_n} →\nbuffer {f.buffer:g}")
-        rows.append((f"fold {f.test_year}", [(start, y0, BLUE, "", is_txt),
-                                              (y0, y1, GREEN, "", f"OOS: {f.test_n}, {f.test_total:+.0f}")]))
-    rows.append(("rule revision\n(5 s, to expiry)", [(T("2022-01-01"), end, ORANGE, "//",
-                                                      "chosen after seeing 2022–2026 → these years acted as validation")]))
-    rows.append(("step 7: paper\ntrading", [(T("2026-11-01"), T("2027-05-01"), "white", "", "clean OOS\n(not started)")]))
+        y0, y1 = T(f"{f.test_year}-01-01"), min(T(f"{f.test_year}-12-31"), end)
+        wf.append((y0, y1, ORANGE, "//", f"{f.test_year}: {f.test_n}, {f.test_total:+.0f}"))
+    rows.append(("walk-forward\n(seen, rule revised)", wf))
+    n_var = len(var)
+    rows.append(("holdout split\n(steps 5–6)", [
+        (start, T("2024-01-01"), BLUE, "", "train: fit the buffer (3)"),
+        (T("2024-01-01"), T("2025-01-01"), ORANGE, "", f"validation:\npick 1 of {n_var} rules"),
+        (T("2025-01-01"), end, GREEN, "", f"test, once: {len(test)} trades, {test['net'].sum():+.0f} pts")]))
+    rows.append(("step 7: paper\ntrading", [(T("2026-11-01"), T("2027-05-01"), "white", "", "clean test\n(not started)")]))
 
-    fig, ax = plt.subplots(figsize=(12, 5.4))
+    fig, ax = plt.subplots(figsize=(12, 4.6))
     for i, (lab, bars) in enumerate(rows):
         yy = len(rows) - 1 - i
         for a, b, c, h, txt in bars:
             ax.barh(yy, (b - a).days, left=a, height=0.6, color=c, alpha=0.85 if c != "white" else 1,
                     hatch=h, edgecolor="black", lw=0.6, ls="--" if c == "white" else "-")
-            light = c in (GREY, "white") or h
+            light = c in (GREY, "white", ORANGE) or h
             ax.text(a + (b - a) / 2, yy, txt, ha="center", va="center", fontsize=7,
                     color="black" if light else "white",
                     bbox=dict(facecolor="white", edgecolor="none", pad=1.5) if h else None)
-        if lab.startswith("fold"):
-            d = o[o["year"] == int(lab.split()[1])]["date"]
-            ax.scatter(d, [yy + 0.36] * len(d), marker="v", s=14, color="black", zorder=3)
+        if lab.startswith("holdout"):
+            ax.scatter(test["date"], [yy + 0.36] * len(test), marker="v", s=14, color="black", zorder=3)
     ax.set_yticks(range(len(rows)), [r[0] for r in rows][::-1], fontsize=8)
     ax.set_xlim(T("2020-05-01"), T("2027-06-01"))
     ax.axvline(end, color=RED, lw=1, ls=":")
-    ax.text(end, len(rows) - 1.5, "data end \n2026-10-23 ", color=RED, fontsize=7, ha="right", va="center")
-    ax.set_title("Data periods: anchored walk-forward (in-sample grows, each year tested once), ▼ = OOS entries")
+    ax.text(end, 0.55, "data end \n2026-10-23 ", color=RED, fontsize=7, ha="right", va="center")
+    ax.set_title("Data periods: train / validation / test, each used once (▼ = test entries)\n"
+                 "hatched: walk-forward years seen before the rule was revised, so not a clean test")
     ax.grid(axis="x", alpha=0.3)
     save(fig, out / "09_data_periods.png")
 

@@ -11,14 +11,18 @@ and short the future, then hold until expiry, when the basis is forced to zero.
 | period | dates | used for |
 |---|---|---|
 | warm-up | 2020-06 → 2021-05 | basket prices only: the first 120-session fit of the hedge basket |
-| in-sample (step 4) | 2021-06-01 → 2026-10-23 | exploration on the whole sample; buffer 3 was found here |
-| in-sample (steps 5–6) | 2021-06-01 → the end of the year before each test year | anchored walk-forward: pick the buffer (and vol cap) with the best total net |
-| out-of-sample (steps 5–6) | each of 2022, 2023, 2024, 2025, 2026 (to 2026-10-23) | trade the test year with the pick; the five years are stitched into the OOS result |
-| validation (de facto) | 2022-01-01 → 2026-10-23 | the 5 s fill and entries up to expiry day were adopted after this period's OOS was seen |
-| clean out-of-sample | from 2026-11 (step 7, not started) | paper trading |
+| **train** | 2021-06-01 → 2023-12-31 | fit the buffer for each candidate rule |
+| **validation** | 2024-01-01 → 2024-12-31 | choose one of 28 candidate rules, automatically |
+| **test** | 2025-01-01 → 2026-10-23 | the chosen rule, scored once: 19 trades, +166 pts |
+| clean test | from 2026-11 (step 7, not started) | paper trading |
 
-There is no separate validation set: the walk-forward replaces it. Because the rule was
-revised after the 2022–2026 OOS had been seen, only paper trading gives a clean test.
+Each period is used once, in that order, and the protocol (periods, candidate rules,
+selection) is fixed in `scripts/holdout_split.py` before it runs. A trade counts in a
+period only if it also expires inside it, so no outcome crosses a boundary. The earlier
+anchored walk-forward (hatched) scored 2022–2026 out of sample, but the entry rule was
+revised after those results were seen, so it is not a clean test; see
+[6e](#6e-train--validation--test-split-scriptsholdout_splitpy). The analyst had seen
+these years before the split too, so only paper trading is untouched.
 
 ## TL;DR
 
@@ -26,7 +30,7 @@ revised after the 2022–2026 OOS had been seen, only paper trading gives a clea
 |---|---|
 | Does the basis converge? | Yes, by construction: the future settles at the VN30 close on expiry day. |
 | Is the daily-close version tradeable? | **No.** It only made money when it filled at the same close that produced the signal. At the next 09:15 open the captured basis falls from 14.4 to 3.9 pts, and walk-forward OOS is −94 pts. |
-| Is the intraday version tradeable? | **At fund costs, yes, but it is small.** Adopted rule: 17 bps fees, 4.5% carry, a 3-pt buffer, a 5 s fill, entries allowed up to expiry day. Out of sample (2022–2026, 41 trades) the edge is **+2.05 pts/trade (t 10.6, 93% positive)**, net +5.89 (t 2.84). Buffer 3 is picked in every walk-forward fold. At retail fees (40 bps) it loses. |
+| Is the intraday version tradeable? | **At fund costs, yes, but it is small.** Adopted rule: 17 bps fees, 4.5% carry, a 3-pt buffer, a 5 s fill, entries allowed up to expiry day. Out of sample (2022–2026, 41 trades) the edge is **+2.05 pts/trade (t 10.6, 93% positive)**, net +5.89 (t 2.84). Buffer 3 is picked in every walk-forward fold. On a train / validation / test split (test 2025–2026, scored once) the edge is +1.85 (t 6.1) over 19 trades. At retail fees (40 bps) it loses. |
 | How big? | The futures bid caps it at ~10–30 contracts per trade, and the rule trades ~8–9 times a year. At 10 contracts: **≈ 17m VND/yr on ≈ 2.5bn (≈ 0.7%/yr above carry)**; ≈ 75m on 25bn (0.3%) at 100. |
 | Biggest risk | The hedge basket drifting from VN30 until expiry: ±13 pts std per trade, ~6× the edge. It was positive in the sample (+3.8/trade), but that came from a few names (VHM, VCB, PLX), so it is treated as luck. Entries in the last week barely drift (±0.2 on average). |
 | Verdict | A real but tiny, capacity-bound edge. Not worth running as a standalone strategy. Step 7 (paper trading) only makes sense with the **official VN30 weights** for the basket. |
@@ -67,7 +71,7 @@ the capital gives up, and the basket not moving exactly like the index.
 | 3 Data processing | [Step 3](#step-3--data-processing-the-hedge-basket) | `tracking_error.py` → `result/tracking/` | done; official weights missing |
 | 4 In-sample backtest | [Step 4](#step-4--in-sample-backtest) | `basis_backtest.py`, `intraday_check.py` → `result/basis*/`, `result/intraday*/` | done |
 | 5 Optimization | [Step 5](#step-5--optimization) | `walk_forward.py`, `walk_forward_intraday.py` | done: one parameter (buffer) |
-| 6 Out-of-sample | [Step 6](#step-6--out-of-sample) | `walk_forward_intraday.py`, `capacity.py` → `result/walkforward_intraday*/`, `result/capacity_5s/` | done: positive, capacity-bound |
+| 6 Out-of-sample | [Step 6](#step-6--out-of-sample) | `walk_forward_intraday.py`, `holdout_split.py`, `capacity.py` → `result/walkforward_intraday*/`, `result/holdout_split/`, `result/capacity_5s/` | done: positive, capacity-bound |
 | 7 Paper trading | [Step 7](#steps-79--not-started) | — | not started |
 | 8–9 Live trading onward | [Steps 8–9](#steps-79--not-started) | — | not started |
 
@@ -361,6 +365,36 @@ The first rule (≥ 7 days, 60 s, `result/capacity/`) made 9.4m/yr on 2.4bn (0.3
 contracts. The adopted rule roughly doubles it: more contracts trade, and the edge at
 5 s is higher.
 
+### 6e. Train / validation / test split (`scripts/holdout_split.py`)
+
+The walk-forward in 6b scored each year out of sample, but the 5 s fill and the entry
+window (6c) were adopted after seeing those years. To give validation and test sets that
+were not used to change the rule, the selection is redone on a fixed protocol:
+
+1. **Candidates, declared up front:** every rule considered in this project. Entries up
+   to expiry day or ≥ 7 days; vol cap none / 25% / 20%; vol < 25% only in the last week;
+   futures spread ≤ 0.5; signals up to 14:15. That gives 28 variants × buffers 0–5. The
+   fill delay is an execution assumption, fixed at 5 s; 30 s and 60 s are shown for
+   comparison.
+2. **Train (2021-06 → 2023-12):** each variant gets the buffer with the best total net
+   (≥ 3 trades). Buffer 3 wins for almost all.
+3. **Validation (2024):** the variant with the best validation total wins (ties go to
+   fewer filters). The winner is *up to expiry day, signals ≤ 14:15* (8 trades, +31.9).
+   The unfiltered rule scored +31.3 and the ≥ 7-day rules +27.4, so this is close to a tie.
+4. **Refit the buffer on train + validation:** 3 (29 trades, +176.6).
+5. **Test (2025-01 → 2026-10), once:**
+
+| fill delay | trades | total | mean | t | > 0 |
+|---|---|---|---|---|---|
+| **5 s** | 19 | **+165.9** | +8.73 | 2.06 | 74% |
+| 30 s | 19 | +158.5 | +8.34 | 1.93 | 74% |
+| 60 s | 19 | +154.1 | +8.11 | 1.88 | 74% |
+
+The test edge (exec − bar) is **+1.85 pts per trade (t 6.1)**, in line with the
+walk-forward (+2.05). Most of the net comes from tracking (+6.88 per trade), which is
+noise. Expect ~1.9 pts per trade, not 8.7. The earlier adopted rule (no 14:15 cut-off)
+gives almost the same on this test: 19 trades, +165.2.
+
 ### Sensitivity to the cost of capital
 
 Carry ≈ 2.75 pts of the 5.3-pt bar; each 1% of rate moves the edge by ≈ 0.6 pts/trade
@@ -436,7 +470,10 @@ python scripts/walk_forward_intraday.py --delay 60 --min-days-expiry 7 --outdir 
 python scripts/walk_forward_intraday.py --delay 5 --min-days-expiry 7 --outdir result/walkforward_intraday_delay5
     # other variants: --late-vol-cap 25, --max-fut-spread 0.5
 
-# step 6c (capacity) and figures
+# step 6e (train 2021-06→2023, validation 2024, test 2025→; reuses the fills caches)
+python scripts/holdout_split.py                  # → result/holdout_split
+
+# step 6d (capacity) and figures
 python scripts/capacity.py --events result/intraday_fund_buffer3_expiry/events.csv --delay 5 --outdir result/capacity_5s
 python scripts/make_figures.py
 ```
@@ -451,6 +488,7 @@ python scripts/make_figures.py
 | `result/intraday*/` | intraday capturability: `events.csv` (trigger × delay × size), summary, by year, by size |
 | `result/walkforward_intraday_expiry*/` | steps 5–6, adopted rule (entries up to expiry day) at 5 / 30 / 60 s, plus the 60 s 14:15 cut-off: `trades.csv` (every combo), `grid.csv`, `folds.csv`, `oos_trades.csv`, `FINDINGS.md` |
 | `result/walkforward_intraday{,_delay5,_delay30}/` | the first rule (≥ 7 days to expiry) at 60 / 5 / 30 s, same files |
+| `result/holdout_split/` | train / validation / test: `variants.csv` (every candidate, train buffer, validation score), `test_trades.csv`, `FINDINGS.md` |
 | `result/capacity_5s/` | fills by size per trigger, P&L/capital by target (adopted rule, 5 s); `result/capacity/` is the first rule at 60 s |
 | `figures/` | the README charts (`make_figures.py`) |
 
@@ -465,7 +503,9 @@ python scripts/make_figures.py
 - Settlement uses the VN30 close on expiry day; check the current HNX rule.
 - Few trades: 41 OOS trades, 6–10 per fold. The edge's t-stat is solid; the net's is not.
 - The adopted rule (5 s fill, entries up to expiry day) was set after the first OOS run
-  had been seen; see 6c.
+  had been seen; see 6c. The train / validation / test split (6e) redoes the choice on a
+  fixed protocol, but the analyst had already seen those years, so paper trading is the
+  only untouched test.
 - Expiry on a holiday: VN30F2602 (Tet, 2026-02-19) and VN30F2404 (Hung Kings, 2024-04-18)
   settle on the contract's last trading day. The first version of
   `walk_forward_intraday.py` treated them as unexpired and dropped the VN30F2602 trade
