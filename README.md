@@ -11,18 +11,18 @@ and short the future, then hold until expiry, when the basis is forced to zero.
 | period | dates | used for |
 |---|---|---|
 | warm-up | 2020-06 → 2021-05 | basket prices only: the first 120-session fit of the hedge basket |
-| **train** | 2021-06-01 → 2023-12-31 | fit the buffer for each candidate rule |
-| **validation** | 2024-01-01 → 2024-12-31 | choose one of 28 candidate rules, automatically |
-| **test** | 2025-01-01 → 2026-10-23 | the chosen rule, scored once: 19 trades, +166 pts |
-| clean test | from 2026-11 (step 7, not started) | paper trading |
+| **1. train** | 2021-06-01 → 2023-12-31 | fit the buffer (0 → 10 pts) for each candidate rule → 3 |
+| **2. validation** | 2024-01-01 → 2024-12-31 | choose one of 28 candidate rules, each with its train buffer (no refit) |
+| **3. test** | 2025-01-01 → 2026-10-23 | the chosen rule and buffer, scored once: 19 trades, +166 pts |
+| 4. paper trading | from 2026-11 (step 7, not started) | clean test |
 
-Each period is used once, in that order, and the protocol (periods, candidate rules,
-selection) is fixed in `scripts/holdout_split.py` before it runs. A trade counts in a
-period only if it also expires inside it, so no outcome crosses a boundary. The earlier
-anchored walk-forward (hatched) scored 2022–2026 out of sample, but the entry rule was
-revised after those results were seen, so it is not a clean test; see
-[6e](#6e-train--validation--test-split-scriptsholdout_splitpy). The analyst had seen
-these years before the split too, so only paper trading is untouched.
+The buffer is chosen on train only and then kept fixed for validation and test. Each
+period is used once, in that order, and the protocol (periods, candidate rules, buffer
+grid, selection) is fixed in `scripts/holdout_split.py` before it runs. A trade counts in
+a period only if it also expires inside it, so no outcome crosses a boundary. The
+analyst had seen these years in earlier exploration (step 4, the walk-forward in 6b),
+so only paper trading is untouched; see
+[6e](#6e-train--validation--test-split-scriptsholdout_splitpy).
 
 ## TL;DR
 
@@ -384,7 +384,7 @@ were not used to change the rule, the selection is redone on a fixed protocol:
 3. **Validation (2024):** the variant with the best validation total wins (ties go to
    fewer filters). The winner is *up to expiry day, signals ≤ 14:15* (8 trades, +31.9).
    The unfiltered rule scored +31.3 and the ≥ 7-day rules +27.4, so this is close to a tie.
-4. **Refit the buffer on train + validation:** 3 (29 trades, +176.6).
+4. **No refit:** the buffer from train (3) is kept for validation and test.
 5. **Test (2025-01 → 2026-10), once:**
 
 | fill delay | trades | total | mean | t | > 0 |
@@ -473,7 +473,7 @@ python scripts/walk_forward_intraday.py --delay 60 --min-days-expiry 7 --outdir 
 python scripts/walk_forward_intraday.py --delay 5 --min-days-expiry 7 --outdir result/walkforward_intraday_delay5
     # other variants: --late-vol-cap 25, --max-fut-spread 0.5
 
-# step 6e (train 2021-06→2023, validation 2024, test 2025→; reuses the fills caches)
+# step 6e (train 2021-06→2023 fits the buffer, validation 2024 picks the rule, test 2025→ once)
 python scripts/holdout_split.py                  # → result/holdout_split
 
 # step 6d (capacity) and figures

@@ -25,7 +25,7 @@ Fees 17 bps round trip, carry 4.5%, fill 5 s after the signal at bid/ask, 1 cont
 | up to expiry day, vol < 25% when < 7 days | 1 | 3 | 18 | +120.9 | 9 | +31.3 | +3.48 |
 | up to expiry day, vol < 25% | 1 | 3 | 15 | +84.1 | 9 | +31.3 | +3.48 |
 
-**Chosen: up to expiry day, signals ≤ 14:15; buffer refitted on train + validation = 3 (29 trades, +176.6).**
+**Chosen: up to expiry day, signals ≤ 14:15, buffer 3 from train (21 trades, +144.7; validation 8 trades, +31.9). The same buffer is used for validation and test.**
 
 ## Test (scored once)
 

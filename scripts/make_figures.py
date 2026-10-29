@@ -204,48 +204,43 @@ def capacity(R: Path, out: Path) -> None:
 
 
 def data_periods(R: Path, out: Path) -> None:
-    """Which data each stage saw: warm-up, step-4 exploration, walk-forward, the train /
-    validation / test split, paper trading."""
+    """Which data each stage saw: warm-up, train / validation / test, paper trading."""
     T = pd.Timestamp
     start, end = T("2021-06-01"), T("2026-10-23")
-    folds = pd.read_csv(R / "walkforward_intraday_expiry" / "folds.csv")
     test = pd.read_csv(R / "holdout_split" / "test_trades.csv", parse_dates=["date"])
     var = pd.read_csv(R / "holdout_split" / "variants.csv")
-    rows = []                                        # (label, [(from, to, colour, hatch, text)])
-    rows.append(("data", [(T("2020-06-01"), start, GREY, "//", "basket prices only:\n120-session fit warm-up"),
-                          (start, T("2023-01-03"), BLUE, "", "minute basis + ticks + book prices"),
-                          (T("2023-01-03"), end, BLUE, "", "… + book sizes (capacity)")]))
-    rows.append(("step 4: in-sample\nexploration", [(start, end, GREY, "", "whole sample: buffer 3 found here")]))
-    wf = [(start, T("2022-01-01"), GREY, "", "train\n(grows)")]
-    for f in folds.itertuples():
-        y0, y1 = T(f"{f.test_year}-01-01"), min(T(f"{f.test_year}-12-31"), end)
-        wf.append((y0, y1, ORANGE, "//", f"{f.test_year}: {f.test_n}, {f.test_total:+.0f}"))
-    rows.append(("walk-forward\n(seen, rule revised)", wf))
-    n_var = len(var)
-    rows.append(("holdout split\n(steps 5–6)", [
-        (start, T("2024-01-01"), BLUE, "", "train: fit the buffer (3)"),
-        (T("2024-01-01"), T("2025-01-01"), ORANGE, "", f"validation:\npick 1 of {n_var} rules"),
-        (T("2025-01-01"), end, GREEN, "", f"test, once: {len(test)} trades, {test['net'].sum():+.0f} pts")]))
-    rows.append(("step 7: paper\ntrading", [(T("2026-11-01"), T("2027-05-01"), "white", "", "clean test\n(not started)")]))
+    b = test["buffer"].iloc[0]
+    rows = [                                         # (label, [(from, to, colour, hatch, text)])
+        ("data", [(T("2020-06-01"), start, GREY, "//", "basket prices only:\n120-session fit warm-up"),
+                  (start, T("2023-01-03"), BLUE, "", "minute basis + ticks + book prices"),
+                  (T("2023-01-03"), end, BLUE, "", "… + book sizes (capacity)")]),
+        ("1. train", [(start, T("2024-01-01"), BLUE, "",
+                       f"fit the buffer (0 → 10 pts) per rule → {b:g}")]),
+        ("2. validation", [(T("2024-01-01"), T("2025-01-01"), ORANGE, "",
+                            f"pick 1 of {len(var)} rules,\nbuffer {b:g} fixed")]),
+        ("3. test", [(T("2025-01-01"), end, GREEN, "",
+                      f"once, nothing changed: {len(test)} trades, {test['net'].sum():+.0f} pts")]),
+        ("4. paper trading\n(step 7)", [(T("2026-11-01"), T("2027-05-01"), "white", "", "clean test\n(not started)")]),
+    ]
 
-    fig, ax = plt.subplots(figsize=(12, 4.6))
+    fig, ax = plt.subplots(figsize=(12, 4.2))
     for i, (lab, bars) in enumerate(rows):
         yy = len(rows) - 1 - i
-        for a, b, c, h, txt in bars:
-            ax.barh(yy, (b - a).days, left=a, height=0.6, color=c, alpha=0.85 if c != "white" else 1,
+        for a, b_, c, h, txt in bars:
+            ax.barh(yy, (b_ - a).days, left=a, height=0.6, color=c, alpha=0.85 if c != "white" else 1,
                     hatch=h, edgecolor="black", lw=0.6, ls="--" if c == "white" else "-")
             light = c in (GREY, "white", ORANGE) or h
-            ax.text(a + (b - a) / 2, yy, txt, ha="center", va="center", fontsize=7,
+            ax.text(a + (b_ - a) / 2, yy, txt, ha="center", va="center", fontsize=7,
                     color="black" if light else "white",
                     bbox=dict(facecolor="white", edgecolor="none", pad=1.5) if h else None)
-        if lab.startswith("holdout"):
+        if lab == "3. test":
             ax.scatter(test["date"], [yy + 0.36] * len(test), marker="v", s=14, color="black", zorder=3)
     ax.set_yticks(range(len(rows)), [r[0] for r in rows][::-1], fontsize=8)
     ax.set_xlim(T("2020-05-01"), T("2027-06-01"))
     ax.axvline(end, color=RED, lw=1, ls=":")
     ax.text(end, 0.55, "data end \n2026-10-23 ", color=RED, fontsize=7, ha="right", va="center")
-    ax.set_title("Data periods: train / validation / test, each used once (▼ = test entries)\n"
-                 "hatched: walk-forward years seen before the rule was revised, so not a clean test")
+    ax.set_title("Data periods: the buffer is fitted on train only, then kept for validation and test "
+                 "(▼ = test entries)")
     ax.grid(axis="x", alpha=0.3)
     save(fig, out / "09_data_periods.png")
 

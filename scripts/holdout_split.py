@@ -28,8 +28,9 @@ it was run:
      2. validation: score each variant with its train buffer; pick the highest
         validation total net with ≥ --min-trades trades; ties go to the variant
         with fewer filters, then the lower buffer
-     3. refit the buffer of the chosen variant on train + validation
-     4. test: trade the test period once with that rule; report whatever comes out
+     3. test: trade the test period once with the chosen variant and its train
+        buffer (no refit: validation and test both use the buffer from train only);
+        report whatever comes out
 
 Caveat: the analyst had already seen 2022–2026 results before writing this, so the
 split limits but cannot remove that knowledge. Paper trading after the data end is
@@ -216,7 +217,7 @@ def main() -> None:
     ok = var[var["val_n"] >= args.min_trades]
     pick = ok.sort_values(["val_total", "filters", "buffer"], ascending=[False, True, True]).iloc[0]
     v = VARIANTS[int(pick["variant"])]
-    b_final, tv_total, tv_n = fit_buffer(f, v, "train", "validation")
+    b_final = float(pick["buffer"])                       # from train only, no refit
 
     test = period(trades(f, v, b_final), "test")
     open_n = int(trades(f, v, b_final).pipe(lambda t: t[(t["date"] >= bounds["test"][0]) & t["net"].isna()]).shape[0])
@@ -232,7 +233,7 @@ def main() -> None:
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     var.sort_values("val_total", ascending=False).to_csv(args.outdir / "variants.csv", index=False)
-    test.reset_index().to_csv(args.outdir / "test_trades.csv", index=False)
+    test.reset_index().assign(buffer=b_final).to_csv(args.outdir / "test_trades.csv", index=False)
 
     vnd = args.multiplier / 1e6
     top = var.sort_values(["val_total", "filters", "buffer"], ascending=[False, True, True]).head(10)
@@ -253,8 +254,9 @@ def main() -> None:
         "|---|---|---|---|---|---|---|---|",
         *[f"| {x.rule} | {x.filters} | {x.buffer:g} | {x.train_n} | {x.train_total:+.1f} | {x.val_n} "
           f"| {x.val_total:+.1f} | {x.val_mean:+.2f} |" for x in top.itertuples()],
-        "", f"**Chosen: {describe(v)}; buffer refitted on train + validation = {b_final:g} "
-        f"({tv_n} trades, {tv_total:+.1f}).**", "",
+        "", f"**Chosen: {describe(v)}, buffer {b_final:g} from train "
+        f"({int(pick['train_n'])} trades, {pick['train_total']:+.1f}; validation {int(pick['val_n'])} trades, "
+        f"{pick['val_total']:+.1f}). The same buffer is used for validation and test.**", "",
         "## Test (scored once)", "",
         "| delay | trades | total | mean | t | >0 |", "|---|---|---|---|---|---|",
         f"| {delay} s | {ts['n']} | {ts['total']:+.1f} | {ts['mean']:+.2f} | {ts['t']:+.2f} | {ts['share_pos']:.0%} |",
