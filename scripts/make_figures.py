@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """project5 — README figures, built only from files already in data/raw and result/.
 
-  figures/01_basis_history.png     daily basis vs the fund cost bar, OOS entries marked
+  figures/01_basis_history.png     intraday basis vs the fund cost bar, train / validation / test entries
   figures/02_tracking.png          5-session tracking gap of the three hedge baskets
   figures/03_close_vs_nextopen.png basis captured: same-close fill vs next-open fill
   figures/04_waterfall.png         displayed → capturable basis → edge, intraday triggers, 5 s
   figures/05_edge_vs_delay.png     edge by fill delay, buffer 0 vs 3 (entries up to expiry day)
   figures/06_buffer_grid.png       whole-sample net/edge by buffer (comparison only), adopted rule
-  figures/07_oos_trades.png        out-of-sample trades of the adopted rule (5 s, up to expiry day)
+  figures/07_oos_trades.png        test trades of the train / validation / test split (5 s)
   figures/08_capacity.png          fill rate by size, P&L and return by target size, 5 s
-  figures/09_data_periods.png      in-sample / OOS / validation periods of the walk-forward
+  figures/09_data_periods.png      train / validation / test / paper-trading periods
 
 Usage:  python scripts/make_figures.py
 """
@@ -35,21 +35,38 @@ def save(fig, path: Path) -> None:
 
 
 def basis_history(R: Path, D: Path, out: Path, fee_bps: float, rate: float) -> None:
+    """Intraday basis (the daily high of the minute series) vs the cost bar, with the chosen
+    rule's entries at their entry-minute basis, by train / validation / test period."""
     f = pd.read_parquet(D / "vn30f_frontmonth.parquet")
     f["date"], f["expdate"] = pd.to_datetime(f["date"]), pd.to_datetime(f["expdate"])
-    f = f.drop_duplicates("date").sort_values("date")
-    basis = f["fut_close"] - f["vn30_index"]
-    bar = f["vn30_index"] * (fee_bps / 1e4 + rate * (f["expdate"] - f["date"]).dt.days / 365)
-    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"])
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(f["date"], basis, color=GREY, lw=0.7, label="daily closing basis (future − VN30)")
-    ax.plot(f["date"], bar, color=ORANGE, lw=1.2, label=f"cost bar: fees {fee_bps:g} bps + carry {rate:.1%}")
-    ax.plot(f["date"], bar + 3, color=ORANGE, lw=1, ls="--", label="bar + buffer 3 (entry line)")
-    ax.scatter(o["date"], o["disp"], color=GREEN, s=28, zorder=3, label="out-of-sample entries (intraday)")
+    expiry = f.groupby("contract")["expdate"].first()
+    m = pd.read_parquet(D / "intraday_basis_minute.parquet")
+    m["minute"] = pd.to_datetime(m["minute"])
+    hm = m["minute"].dt.hour * 100 + m["minute"].dt.minute
+    m = m[((hm >= 916) & (hm <= 1129)) | ((hm >= 1300) & (hm <= 1429))]   # continuous session
+    m["date"] = m["minute"].dt.normalize()
+    m["disp"] = m["fut_last"] - m["vn30"]
+    d = m.groupby("date").agg(high=("disp", "max"), vn30=("vn30", "last"), contract=("contract", "last"))
+    d["bar"] = d["vn30"] * (fee_bps / 1e4 + rate * (d["contract"].map(expiry) - d.index).dt.days / 365)
+    t = pd.read_csv(R / "holdout_split" / "chosen_trades.csv", parse_dates=["date"])
+    b = t["buffer"].iloc[0]
+
+    fig, ax = plt.subplots(figsize=(11, 4.2))
+    for k, (a, z) in {"train": ("2021-06-01", "2024-01-01"), "validation": ("2024-01-01", "2025-01-01"),
+                      "test": ("2025-01-01", str(d.index.max().date()))}.items():
+        ax.axvspan(pd.Timestamp(a), pd.Timestamp(z), color={"train": BLUE, "validation": ORANGE,
+                                                             "test": GREEN}[k], alpha=0.06, lw=0)
+    ax.plot(d.index, d["high"], color=GREY, lw=0.7, label="intraday basis: daily high (future − VN30, by minute)")
+    ax.plot(d.index, d["bar"], color=ORANGE, lw=1.2, label=f"cost bar: fees {fee_bps:g} bps + carry {rate:.1%}")
+    ax.plot(d.index, d["bar"] + b, color=ORANGE, lw=1, ls="--", label=f"bar + buffer {b:g} (entry line)")
+    for k, c in [("train", BLUE), ("validation", ORANGE), ("test", GREEN)]:
+        x = t[t["period"] == k]
+        ax.scatter(x["minute"].astype("datetime64[ns]"), x["disp"], color=c, edgecolor="black", lw=0.4,
+                   s=30, zorder=3, label=f"{k} entries ({len(x)}, at the entry-minute basis)")
     ax.axhline(0, color="black", lw=0.6)
     ax.set_ylabel("index points")
-    ax.set_title("The future usually trades at a discount; the rich setups are rare spikes")
-    ax.legend(loc="lower left", fontsize=8, ncol=2)
+    ax.set_title("Intraday basis vs the cost bar: the rich setups are rare spikes")
+    ax.legend(loc="lower left", fontsize=7.5, ncol=2)
     save(fig, out / "01_basis_history.png")
 
 
@@ -162,7 +179,7 @@ def buffer_grid(R: Path, out: Path) -> None:
 
 
 def oos_trades(R: Path, out: Path) -> None:
-    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"]).sort_values("date")
+    o = pd.read_csv(R / "holdout_split" / "test_trades.csv", parse_dates=["date"]).sort_values("date")
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(11, 6), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
     x = np.arange(len(o))
     a1.bar(x, o["edge"], color=BLUE, label=f"edge (mean {o['edge'].mean():+.2f})")
@@ -171,7 +188,8 @@ def oos_trades(R: Path, out: Path) -> None:
     a1.scatter(x, o["net"], color="black", s=14, zorder=3, label="net")
     a1.axhline(0, color="black", lw=0.6)
     a1.set_ylabel("points per contract")
-    a1.set_title("Out-of-sample trades (buffer 3 picked in every fold): the edge is steady, tracking is noise")
+    a1.set_title(f"Test trades 2025 → 2026-10 (rule from validation, buffer {o['buffer'].iloc[0]:g} from train, "
+                 "scored once): the edge is steady, tracking is noise", fontsize=10)
     a1.legend(fontsize=8, loc="upper left")
     a2.plot(x, o["edge"].cumsum(), color=BLUE, marker="o", ms=3, label="cumulative edge")
     a2.plot(x, o["net"].cumsum(), color="black", marker="o", ms=3, label="cumulative net")

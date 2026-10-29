@@ -111,10 +111,14 @@ Data facts that shaped the design:
 
 ![basis history](figures/01_basis_history.png)
 
-*Daily closing basis since 2021-06. The future usually trades at a **discount** (median
-−1.3 pts); only ~2% of days close at +8 or more. The orange line is the fund-cost bar (17
+*Intraday basis since 2021-06: the grey line is each day's highest minute basis (future −
+VN30, continuous session), the same quantity the entries are measured on. The future
+usually trades at a **discount** (median minute basis −1.1 pts), and the intraday high
+reaches the entry line on only ~15% of days. The orange line is the fund-cost bar (17
 bps + 4.5% carry), which saw-tooths down into each expiry as carry runs off. The dashed
-line is the entry line (bar + 3). Green dots are the 41 out-of-sample intraday entries of the adopted rule (each contract's first trigger, at its intraday basis).*
+line is the entry line (bar + 3). Dots are the chosen rule's entries (each contract's
+first trigger, at its entry-minute basis), coloured by period: train 2021-06 → 2023 (21),
+validation 2024 (8), test 2025 → 2026-10 (19).*
 
 ## Step 3 — Data processing: the hedge basket
 
@@ -269,8 +273,6 @@ while the basket is sold at each name's close, with dividends via adjusted/raw c
 
 **Stitched OOS: 41 trades, +242 pts (24.2m VND per contract), mean +5.89, t +2.84, 78% positive.**
 
-![oos trades](figures/07_oos_trades.png)
-
 - **Buffer 3 is picked in every fold**; the volatility filter never is. The one tuned
   parameter is stable out of sample.
 - The **edge** is the strategy: +2.05 pts/trade, t +10.6, 93% positive.
@@ -393,6 +395,8 @@ were not used to change the rule, the selection is redone on a fixed protocol:
 | 30 s | 19 | +158.5 | +8.34 | 1.93 | 74% |
 | 60 s | 19 | +154.1 | +8.11 | 1.88 | 74% |
 
+![test trades](figures/07_oos_trades.png)
+
 The test edge (exec − bar) is **+1.85 pts per trade (t 6.1)**, in line with the
 walk-forward (+2.05). Most of the net comes from tracking (+6.88 per trade), which is
 noise. Expect ~1.9 pts per trade, not 8.7. The earlier adopted rule (no 14:15 cut-off)
@@ -491,7 +495,7 @@ python scripts/make_figures.py
 | `result/intraday*/` | intraday capturability: `events.csv` (trigger × delay × size), summary, by year, by size |
 | `result/walkforward_intraday_expiry*/` | steps 5–6, adopted rule (entries up to expiry day) at 5 / 30 / 60 s, plus the 60 s 14:15 cut-off: `trades.csv` (every combo), `grid.csv`, `folds.csv`, `oos_trades.csv`, `FINDINGS.md` |
 | `result/walkforward_intraday{,_delay5,_delay30}/` | the first rule (≥ 7 days to expiry) at 60 / 5 / 30 s, same files |
-| `result/holdout_split/` | train / validation / test: `variants.csv` (every candidate, train buffer, validation score), `test_trades.csv`, `FINDINGS.md` |
+| `result/holdout_split/` | train / validation / test: `variants.csv` (every candidate, train buffer, validation score), `test_trades.csv`, `chosen_trades.csv` (the chosen rule in all three periods), `FINDINGS.md` |
 | `result/capacity_5s/` | fills by size per trigger, P&L/capital by target (adopted rule, 5 s); `result/capacity/` is the first rule at 60 s |
 | `figures/` | the README charts (`make_figures.py`) |
 

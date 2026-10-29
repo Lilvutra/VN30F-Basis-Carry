@@ -230,6 +230,7 @@ steps:
     outputs:
       - result/holdout_split/variants.csv
       - result/holdout_split/test_trades.csv
+      - result/holdout_split/chosen_trades.csv
       - result/holdout_split/FINDINGS.md
     depends_on: [walkforward_intraday]
 
@@ -245,7 +246,9 @@ steps:
       - data/raw/vn30f_frontmonth.parquet
       - result/walkforward_intraday_expiry/oos_trades.csv
       - result/capacity_5s/fills.csv
+      - result/holdout_split/chosen_trades.csv
       - result/holdout_split/test_trades.csv
+      - data/raw/intraday_basis_minute.parquet
     outputs:
       - figures/01_basis_history.png
       - figures/07_oos_trades.png

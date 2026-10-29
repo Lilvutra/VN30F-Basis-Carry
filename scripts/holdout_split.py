@@ -42,6 +42,7 @@ filled from the database for any trigger minute it lacks.
 Outputs (--outdir, default result/holdout_split/):
   variants.csv   every variant: train buffer, train/validation results
   test_trades.csv the test trades of the frozen rule
+  chosen_trades.csv the chosen rule's trades in train, validation and test
   FINDINGS.md
 
 Usage:
@@ -234,6 +235,9 @@ def main() -> None:
     args.outdir.mkdir(parents=True, exist_ok=True)
     var.sort_values("val_total", ascending=False).to_csv(args.outdir / "variants.csv", index=False)
     test.reset_index().assign(buffer=b_final).to_csv(args.outdir / "test_trades.csv", index=False)
+    chosen = trades(f, v, b_final)
+    pd.concat([period(chosen, k).assign(period=k) for k in PERIODS]).reset_index() \
+        .assign(buffer=b_final).to_csv(args.outdir / "chosen_trades.csv", index=False)
 
     vnd = args.multiplier / 1e6
     top = var.sort_values(["val_total", "filters", "buffer"], ascending=[False, True, True]).head(10)
