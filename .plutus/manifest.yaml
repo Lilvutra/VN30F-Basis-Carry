@@ -231,6 +231,7 @@ steps:
       - result/holdout_split/variants.csv
       - result/holdout_split/test_trades.csv
       - result/holdout_split/chosen_trades.csv
+      - result/holdout_split/daily_equity.csv
       - result/holdout_split/FINDINGS.md
     depends_on: [walkforward_intraday]
 
@@ -248,11 +249,13 @@ steps:
       - result/capacity_5s/fills.csv
       - result/holdout_split/chosen_trades.csv
       - result/holdout_split/test_trades.csv
+      - result/holdout_split/daily_equity.csv
       - data/raw/intraday_basis_minute.parquet
     outputs:
       - figures/01_basis_history.png
       - figures/07_oos_trades.png
       - figures/09_data_periods.png
+      - figures/10_equity_drawdown.png
     depends_on: [walkforward_intraday, holdout_split, capacity, tracking, backtest_fit]
 
 nine_step_coverage:

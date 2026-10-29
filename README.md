@@ -32,6 +32,7 @@ so only paper trading is untouched; see
 | Is the daily-close version tradeable? | **No.** It only made money when it filled at the same close that produced the signal. At the next 09:15 open the captured basis falls from 14.4 to 3.9 pts, and walk-forward OOS is −94 pts. |
 | Is the intraday version tradeable? | **At fund costs, yes, but it is small.** Adopted rule: 17 bps fees, 4.5% carry, a 3-pt buffer, a 5 s fill, entries allowed up to expiry day. Out of sample (2022–2026, 41 trades) the edge is **+2.05 pts/trade (t 10.6, 93% positive)**, net +5.89 (t 2.84). Buffer 3 is picked in every walk-forward fold. On a train / validation / test split (test 2025–2026, scored once) the edge is +1.85 (t 6.1) over 19 trades. At retail fees (40 bps) it loses. |
 | How big? | The futures bid caps it at ~10–30 contracts per trade, and the rule trades ~8–9 times a year. At 10 contracts: **≈ 17m VND/yr on ≈ 2.5bn (≈ 0.7%/yr above carry)**; ≈ 75m on 25bn (0.3%) at 100. |
+| Sharpe / drawdown | Marked to market daily, 1 contract: test Sharpe **1.07**, max drawdown **−42 pts (−1.9% of capital)**; ~1.1 in train and validation too. Of the test's 4.3%/yr above carry only 0.9% is edge. |
 | Biggest risk | The hedge basket drifting from VN30 until expiry: ±13 pts std per trade, ~6× the edge. It was positive in the sample (+3.8/trade), but that came from a few names (VHM, VCB, PLX), so it is treated as luck. Entries in the last week barely drift (±0.2 on average). |
 | Verdict | A real but tiny, capacity-bound edge. Not worth running as a standalone strategy. Step 7 (paper trading) only makes sense with the **official VN30 weights** for the basket. |
 
@@ -402,6 +403,30 @@ walk-forward (+2.05). Most of the net comes from tracking (+6.88 per trade), whi
 noise. Expect ~1.9 pts per trade, not 8.7. The earlier adopted rule (no 14:15 cut-off)
 gives almost the same on this test: 19 trades, +165.2.
 
+**Risk: Sharpe and drawdown.** Every trade of the chosen rule is marked to market at each
+close (futures leg at the futures close, basket at its closes, fees at entry, carry accrued
+by day; the path ends exactly at the trade's net). One contract per trade; capital per
+contract = VN30 × 1.2 (basket + 20% futures margin); returns are above carry.
+
+![equity and drawdown](figures/10_equity_drawdown.png)
+
+| period | trades | return/yr | edge only/yr | vol/yr | Sharpe (daily) | Sharpe (monthly, realised) | max drawdown | worst trade |
+|---|---|---|---|---|---|---|---|---|
+| train | 21 | 3.59% | 1.23% | 2.75% | 1.30 | 2.29 | −30.1 pts (−1.93%) | +0.4 |
+| validation | 8 | 2.18% | 1.21% | 1.96% | 1.11 | 1.42 | −11.0 pts (−0.72%) | −2.8 |
+| **test** | 19 | 4.30% | 0.91% | 4.00% | **1.07** | 1.50 | **−42.0 pts (−1.94%)** | −21.0 |
+
+- The daily Sharpe is ~1.1 in every period. The monthly realised Sharpe looks better only
+  because it hides the swings while a trade is open.
+- The drawdown comes from tracking: the basket drifts away from VN30 while held, then
+  mostly comes back by expiry. The test trough (−42 pts, 2025-12-30) is inside open trades;
+  the worst closed trade is −21.
+- Of the 4.3%/yr in the test, only 0.9% is edge; the rest is tracking that happened to be
+  positive. With official VN30 weights the tracking (and the drawdown) would shrink, and so
+  would the return, toward the edge.
+- Cash on top of this: the short future can need up to 175 pts (~17.5m VND per contract)
+  of margin top-up while the basket gain is not yet cash.
+
 ### Sensitivity to the cost of capital
 
 Carry ≈ 2.75 pts of the 5.3-pt bar; each 1% of rate moves the edge by ≈ 0.6 pts/trade
@@ -495,7 +520,7 @@ python scripts/make_figures.py
 | `result/intraday*/` | intraday capturability: `events.csv` (trigger × delay × size), summary, by year, by size |
 | `result/walkforward_intraday_expiry*/` | steps 5–6, adopted rule (entries up to expiry day) at 5 / 30 / 60 s, plus the 60 s 14:15 cut-off: `trades.csv` (every combo), `grid.csv`, `folds.csv`, `oos_trades.csv`, `FINDINGS.md` |
 | `result/walkforward_intraday{,_delay5,_delay30}/` | the first rule (≥ 7 days to expiry) at 60 / 5 / 30 s, same files |
-| `result/holdout_split/` | train / validation / test: `variants.csv` (every candidate, train buffer, validation score), `test_trades.csv`, `chosen_trades.csv` (the chosen rule in all three periods), `FINDINGS.md` |
+| `result/holdout_split/` | train / validation / test: `variants.csv` (every candidate, train buffer, validation score), `test_trades.csv`, `chosen_trades.csv` (the chosen rule in all three periods), `daily_equity.csv` (marked-to-market equity and drawdown), `FINDINGS.md` (incl. Sharpe and drawdown) |
 | `result/capacity_5s/` | fills by size per trigger, P&L/capital by target (adopted rule, 5 s); `result/capacity/` is the first rule at 60 s |
 | `figures/` | the README charts (`make_figures.py`) |
 

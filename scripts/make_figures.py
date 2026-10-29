@@ -10,6 +10,7 @@
   figures/07_oos_trades.png        test trades of the train / validation / test split (5 s)
   figures/08_capacity.png          fill rate by size, P&L and return by target size, 5 s
   figures/09_data_periods.png      train / validation / test / paper-trading periods
+  figures/10_equity_drawdown.png   marked-to-market equity and drawdown of the chosen rule, by period
 
 Usage:  python scripts/make_figures.py
 """
@@ -263,6 +264,25 @@ def data_periods(R: Path, out: Path) -> None:
     save(fig, out / "09_data_periods.png")
 
 
+def equity_drawdown(R: Path, out: Path) -> None:
+    e = pd.read_csv(R / "holdout_split" / "daily_equity.csv", parse_dates=["day"])
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
+    for k, c in [("train", BLUE), ("validation", ORANGE), ("test", GREEN)]:
+        x = e[e["period"] == k]
+        a1.plot(x["day"], x["equity"], color=c, lw=1.2, label=f"{k} (restarts at 0)")
+        a2.fill_between(x["day"], x["drawdown"], 0, color=c, alpha=0.5)
+        i = x["drawdown"].idxmin()
+        a2.annotate(f"{x.loc[i, 'drawdown']:.0f}", (x.loc[i, "day"], x.loc[i, "drawdown"]),
+                    textcoords="offset points", xytext=(0, -9), ha="center", fontsize=7)
+    a1.axhline(0, color="black", lw=0.6)
+    a1.set_ylabel("points per contract")
+    a1.set_title("Chosen rule, 1 contract, marked to market at each close: equity and drawdown by period")
+    a1.legend(fontsize=8, loc="upper left")
+    a2.set_ylabel("drawdown (points)")
+    a2.set_ylim(e["drawdown"].min() * 1.35, 2)
+    save(fig, out / "10_equity_drawdown.png")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="README figures.")
     ap.add_argument("--result", type=Path, default=Path("result"))
@@ -281,6 +301,7 @@ def main() -> None:
     oos_trades(args.result, args.outdir)
     capacity(args.result, args.outdir)
     data_periods(args.result, args.outdir)
+    equity_drawdown(args.result, args.outdir)
 
 
 if __name__ == "__main__":

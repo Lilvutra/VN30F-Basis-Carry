@@ -56,8 +56,9 @@ from basis_backtest import fit_weights, load_basket, load_futures, load_members,
 from intraday_check import SESSION, SESSION_FILL, asof, minute_basis, quotes
 
 
-def fill_and_hold(r, raw, adj, snaps, fut, args) -> dict:
-    """Entry at the quotes --delay s after the signal minute, held to expiry."""
+def fill_and_hold(r, raw, adj, snaps, fut, args, with_path: bool = False) -> dict:
+    """Entry at the quotes --delay s after the signal minute, held to expiry. with_path adds
+    "path": the gross P&L (futures + basket, points) marked at each close from entry to expiry."""
     ts = r.minute + pd.Timedelta(seconds=59)
     tf = ts + pd.Timedelta(seconds=args.delay)
     prev = raw.index[raw.index < r.date]
@@ -90,8 +91,18 @@ def fill_and_hold(r, raw, adj, snaps, fut, args) -> dict:
     fut_pnl = f_bid - fsp
     hold = fut[(fut["date"] > r.date) & (fut["date"] <= exp) & (fut["contract"] == r.contract)]
     worst = float(np.maximum(hold["fut_close"].max() - f_bid, 0)) if len(hold) else 0.0
-    return {**out, "exec": exec_, "fsp": fsp, "fut_pnl": fut_pnl, "basket_pnl": basket_pnl,
-            "margin_topup": worst}
+    res = {**out, "exec": exec_, "fsp": fsp, "fut_pnl": fut_pnl, "basket_pnl": basket_pnl,
+           "margin_topup": worst}
+    if with_path:
+        days = raw.loc[r.date:exp].index
+        px = raw.loc[:exp, names].ffill().loc[days]
+        gd = ((adj.loc[days, names] / raw.loc[days, names])
+              / (adj.loc[r.date, names] / raw.loc[r.date, names])).fillna(1.0)
+        bsk = r.vn30 * ((px * gd - sa[ok]) / last0[ok] * ww).sum(axis=1)
+        fc = fut[fut["contract"] == r.contract].set_index("date")["fut_close"].reindex(days).ffill()
+        fc.iloc[-1] = fsp                                      # settles at the VN30 close
+        res["path"] = (f_bid - fc) + bsk
+    return res
 
 
 def main() -> None:

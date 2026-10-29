@@ -43,6 +43,8 @@ Outputs (--outdir, default result/holdout_split/):
   variants.csv   every variant: train buffer, train/validation results
   test_trades.csv the test trades of the frozen rule
   chosen_trades.csv the chosen rule's trades in train, validation and test
+  daily_equity.csv  the chosen rule's marked-to-market equity and drawdown per period
+                 (daily paths cached in data/raw/holdout_mtm_delay{d}.parquet)
   FINDINGS.md
 
 Usage:
@@ -239,6 +241,54 @@ def main() -> None:
     pd.concat([period(chosen, k).assign(period=k) for k in PERIODS]).reset_index() \
         .assign(buffer=b_final).to_csv(args.outdir / "chosen_trades.csv", index=False)
 
+    # risk: every chosen-rule trade marked to market at each close (both legs, fees at entry,
+    # carry accrued by day), summed into one equity line per period, 1 contract per trade
+    args.delay = delay
+    ct = pd.concat([period(chosen, k).assign(period=k) for k in PERIODS]).reset_index()
+    mtm_path = Path(f"data/raw/holdout_mtm_delay{delay}.parquet")
+    mc = pd.read_parquet(mtm_path) if mtm_path.exists() else pd.DataFrame(columns=["minute", "day", "gross"])
+    have = set(pd.to_datetime(mc["minute"]))
+    new = []
+    for r in ct[~ct["minute"].isin(have)].itertuples():
+        g = fill_and_hold(r, raw, adj, snaps, fut, args, with_path=True)["path"]
+        new.append(pd.DataFrame({"minute": r.minute, "day": g.index, "gross": g.values}))
+    if new:
+        mc = pd.concat([mc, *new], ignore_index=True)
+        mc.to_parquet(mtm_path)
+    mc["minute"], mc["day"] = pd.to_datetime(mc["minute"]), pd.to_datetime(mc["day"])
+    mc = mc.merge(ct[["minute", "date", "dte", "fees", "carry", "net", "vn30", "period"]], on="minute")
+    mc["mtm"] = mc["gross"] - mc["fees"] - mc["carry"] * (mc["day"] - mc["date"]).dt.days / mc["dte"].clip(lower=1)
+    gap = mc.groupby("minute").last().eval("mtm - net").abs().max()        # must match the trade's net
+    days = pd.DatetimeIndex(sorted(fut["date"].unique()))
+    risk, eq_all = [], []
+    for k in PERIODS:
+        lo, hi = bounds[k][0], min(bounds[k][1], days.max())
+        d = days[(days >= lo) & (days <= hi)]
+        x = mc[mc["period"] == k]
+        if x.empty:
+            continue
+        open_ = x.pivot_table(index="day", columns="minute", values="mtm").reindex(d)
+        final = x.groupby("minute").last()
+        exp_day = x.groupby("minute")["day"].max()
+        for mnt in open_.columns:                              # realised net stays after expiry
+            open_.loc[open_.index > exp_day[mnt], mnt] = final.loc[mnt, "mtm"]
+        eq = open_.fillna(0).sum(axis=1)
+        cap = float((final["vn30"] * 1.2).mean())             # basket + 20% futures margin, points
+        r = eq.diff().fillna(eq) / cap
+        dd = eq - eq.cummax()
+        m = x.groupby("minute").last()
+        mon = (m.assign(mo=pd.to_datetime(exp_day).dt.to_period("M"))
+               .groupby("mo")["net"].sum().reindex(pd.period_range(d.min(), d.max(), freq="M"), fill_value=0) / cap)
+        risk.append({"period": k, "n": len(m), "days": len(d), "ret_yr": eq.iloc[-1] / cap / (len(d) / 252),
+                     "vol_yr": r.std() * np.sqrt(252), "sharpe": r.mean() / r.std() * np.sqrt(252),
+                     "sharpe_monthly": mon.mean() / mon.std() * np.sqrt(12),
+                     "max_dd": dd.min(), "max_dd_pct": dd.min() / cap,
+                     "dd_end": dd.idxmin().date(), "worst_trade": m["net"].min(),
+                     "edge_ret_yr": float(ct.set_index("minute").loc[m.index, "edge"].sum()) / cap / (len(d) / 252)})
+        eq_all.append(pd.DataFrame({"day": d, "period": k, "equity": eq.values, "drawdown": dd.values}))
+    risk = pd.DataFrame(risk)
+    pd.concat(eq_all).to_csv(args.outdir / "daily_equity.csv", index=False)
+
     vnd = args.multiplier / 1e6
     top = var.sort_values(["val_total", "filters", "buffer"], ascending=[False, True, True]).head(10)
     end = test["expdate"].max().date() if len(test) else "-"
@@ -274,6 +324,16 @@ def main() -> None:
         f"For comparison only (picked after seeing 2022–2026): the earlier adopted rule (up to expiry day, "
         f"buffer 3, no filters) on the same test period: {adopted['n']} trades, {adopted['total']:+.1f}, "
         f"mean {adopted['mean']:+.2f}.",
+        "", "## Risk: Sharpe and drawdown (1 contract, marked to market at each close)", "",
+        "Capital per contract = VN30 × 1.2 (basket + 20% futures margin). Returns are above carry. "
+        "Sharpe (daily) uses the daily change of the marked-to-market equity; Sharpe (monthly, realised) "
+        "books each trade's net in its expiry month.", "",
+        "| period | trades | return/yr | edge only/yr | vol/yr | Sharpe (daily) | Sharpe (monthly, realised) "
+        "| max drawdown | trough | worst trade |", "|---|---|---|---|---|---|---|---|---|---|",
+        *[f"| {x.period} | {x.n} | {x.ret_yr:.2%} | {x.edge_ret_yr:.2%} | {x.vol_yr:.2%} | {x.sharpe:.2f} "
+          f"| {x.sharpe_monthly:.2f} | {x.max_dd:+.1f} pts ({x.max_dd_pct:.2%}) | {x.dd_end} | {x.worst_trade:+.1f} |"
+          for x in risk.itertuples()],
+        "", f"Check: the marked-to-market path ends at each trade's net (max gap {gap:.2g} pts).",
         "", "Caveat: the analyst had seen these years before the split, so the test is cleaner than the "
         "walk-forward but not untouched. Paper trading after the data end is the only clean test.",
     ]
