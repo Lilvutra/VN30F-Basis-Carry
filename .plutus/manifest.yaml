@@ -164,7 +164,7 @@ steps:
     nine_step: step_6_out_of_sample
     required: false
     label: "Intraday step 1: displayed vs capturable (bid/ask) basis at triggers, held to expiry"
-    command: "python scripts/intraday_check.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --outdir result/intraday"
+    command: "python scripts/intraday_check.py --futures data/raw/vn30f_frontmonth.parquet --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet --fee-bps 17 --buffer 3 --min-days-expiry 0 --delays 0,5,30,60,120 --sizes 1,10,50,100 --outdir result/intraday_fund_buffer3_expiry"
     network: bridge
     verification_mode: execute
     timeout_seconds: 3600
@@ -174,25 +174,25 @@ steps:
       - data/raw/vn30_membership.parquet
     outputs:
       - data/raw/intraday_basis_minute.parquet
-      - result/intraday/events.csv
-      - result/intraday/FINDINGS.md
+      - result/intraday_fund_buffer3_expiry/events.csv
+      - result/intraday_fund_buffer3_expiry/FINDINGS.md
     depends_on: [futures, membership, basket]
 
   - id: capacity
     nine_step: step_6_out_of_sample
     required: false
     label: "Capacity: partial fills from the top-3 book at each fund buffer-3 trigger, P&L and capital by target size"
-    command: "python scripts/capacity.py --events result/intraday_fund_buffer3/events.csv --outdir result/capacity"
+    command: "python scripts/capacity.py --events result/intraday_fund_buffer3_expiry/events.csv --delay 5 --outdir result/capacity_5s"
     network: bridge
     verification_mode: execute
     timeout_seconds: 3600
     inputs:
-      - result/intraday_fund_buffer3/events.csv
+      - result/intraday_fund_buffer3_expiry/events.csv
       - data/raw/vn30_basket_prices.parquet
       - data/raw/vn30_membership.parquet
     outputs:
-      - result/capacity/capacity.csv
-      - result/capacity/FINDINGS.md
+      - result/capacity_5s/capacity.csv
+      - result/capacity_5s/FINDINGS.md
     depends_on: [intraday_check]
 
   - id: walkforward_intraday
@@ -225,10 +225,11 @@ steps:
     inputs:
       - data/raw/vn30f_frontmonth.parquet
       - result/walkforward_intraday_expiry/oos_trades.csv
-      - result/capacity/fills.csv
+      - result/capacity_5s/fills.csv
     outputs:
       - figures/01_basis_history.png
       - figures/07_oos_trades.png
+      - figures/09_data_periods.png
     depends_on: [walkforward_intraday, capacity, tracking, backtest_fit]
 
 nine_step_coverage:

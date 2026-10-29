@@ -4,11 +4,12 @@
   figures/01_basis_history.png     daily basis vs the fund cost bar, OOS entries marked
   figures/02_tracking.png          5-session tracking gap of the three hedge baskets
   figures/03_close_vs_nextopen.png basis captured: same-close fill vs next-open fill
-  figures/04_waterfall.png         displayed → capturable basis → edge, intraday triggers
-  figures/05_edge_vs_delay.png     edge by fill delay, buffer 0 vs 3
+  figures/04_waterfall.png         displayed → capturable basis → edge, intraday triggers, 5 s
+  figures/05_edge_vs_delay.png     edge by fill delay, buffer 0 vs 3 (entries up to expiry day)
   figures/06_buffer_grid.png       whole-sample net/edge by buffer (comparison only), adopted rule
   figures/07_oos_trades.png        out-of-sample trades of the adopted rule (5 s, up to expiry day)
-  figures/08_capacity.png          fill rate by size, P&L and return by target size
+  figures/08_capacity.png          fill rate by size, P&L and return by target size, 5 s
+  figures/09_data_periods.png      in-sample / OOS / validation periods of the walk-forward
 
 Usage:  python scripts/make_figures.py
 """
@@ -93,11 +94,11 @@ def close_vs_nextopen(R: Path, out: Path) -> None:
 
 
 def waterfall(R: Path, out: Path) -> None:
-    s = pd.read_csv(R / "intraday_fund_buffer3" / "summary.csv", index_col=0)
-    z, d = s.loc[0], s.loc[60]
+    s = pd.read_csv(R / "intraday_fund_buffer3_expiry" / "summary.csv", index_col=0)
+    z, d = s.loc[0], s.loc[5]
     steps = [("displayed\nbasis", d["disp"], "total"),
              ("index\nstaleness", z["mid"] - d["disp"], "delta"),
-             ("60 s\ndecay", d["mid"] - z["mid"], "delta"),
+             ("5 s\ndecay", d["mid"] - z["mid"], "delta"),
              ("bid/ask\nspreads", d["exec"] - d["mid"], "delta"),
              ("capturable", d["exec"], "total"),
              ("fees +\ncarry", -d["bar"], "delta"),
@@ -116,20 +117,23 @@ def waterfall(R: Path, out: Path) -> None:
     ax.set_xticks(range(len(steps)), [s[0] for s in steps], fontsize=8)
     ax.set_ylim(0, d["disp"] + 1.2)
     ax.set_ylabel(f"index points (mean of {int(d['n'])} triggers)")
-    ax.set_title("Fund fees, buffer 3: where the on-screen basis goes before it is yours")
+    ax.set_title("Fund fees, buffer 3, 5 s fill: where the on-screen basis goes before it is yours")
     save(fig, out / "04_waterfall.png")
 
 
 def edge_vs_delay(R: Path, out: Path) -> None:
     fig, ax = plt.subplots(figsize=(7, 3.8))
-    for d, c, lab in [("intraday_fund_buffer0", RED, "buffer 0"), ("intraday_fund_buffer3", GREEN, "buffer 3")]:
+    for d, c, lab in [("intraday_fund_buffer0_expiry", RED, "buffer 0"), ("intraday_fund_buffer3_expiry", GREEN, "buffer 3")]:
         s = pd.read_csv(R / d / "summary.csv")
-        ax.plot(s["delay_s"], s["edge_mean"], marker="o", color=c, label=f"{lab} ({int(s.loc[s['delay_s'] == 60, 'n'].iloc[0])} triggers at 60 s)")
+        ax.plot(s["delay_s"], s["edge_mean"], marker="o", color=c, label=f"{lab} ({int(s.loc[s['delay_s'] == 5, 'n'].iloc[0])} triggers at 5 s)")
         for x, y in zip(s["delay_s"], s["edge_mean"]):
-            ax.annotate(f"{y:+.2f}", (x, y), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8)
+            dx, ha = {0: (-4, "right"), 5: (4, "left")}.get(x, (0, "center"))   # 0 s and 5 s sit close
+            ax.annotate(f"{y:+.2f}", (x, y), textcoords="offset points", xytext=(dx, 7), ha=ha, fontsize=8)
     ax.axhline(0, color="black", lw=0.6)
     ax.margins(y=0.15)
-    ax.set_xlabel("seconds from signal to fill")
+    ax.axvline(5, color=GREY, lw=0.8, ls="--")
+    ax.set_xlim(-14, 128)
+    ax.set_xlabel("seconds from signal to fill (dashed: the adopted 5 s)")
     ax.set_ylabel("edge per trade (points)")
     ax.set_title("The edge decays with every second of delay")
     ax.legend(fontsize=8)
@@ -178,15 +182,15 @@ def oos_trades(R: Path, out: Path) -> None:
 
 
 def capacity(R: Path, out: Path) -> None:
-    f = pd.read_csv(R / "capacity" / "fills.csv")
-    c = pd.read_csv(R / "capacity" / "capacity.csv")
+    f = pd.read_csv(R / "capacity_5s" / "fills.csv")
+    c = pd.read_csv(R / "capacity_5s" / "capacity.csv")
     c = c[c["policy"] == "first"]
     k = f.groupby("k").agg(fillable=("filled", "mean"), fut_short=("fut_short", "mean"))
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 3.8))
     a1.plot(k.index, k["fillable"] * 100, marker="o", color=BLUE, label="all legs fill in the top 3 levels")
     a1.plot(k.index, k["fut_short"] * 100, marker="o", color=RED, label="futures bid runs out")
     a1.set_xlabel("contracts per trade")
-    a1.set_ylabel("% of triggers (2023+)")
+    a1.set_ylabel("% of triggers (2023+, 5 s)")
     a1.set_title("The book caps the size")
     a1.legend(fontsize=8)
     a2.bar(c["target"].astype(str), c["pnl_m_per_yr"], color=GREEN)
@@ -197,6 +201,50 @@ def capacity(R: Path, out: Path) -> None:
     a2.set_ylim(0, c["pnl_m_per_yr"].max() * 1.35)
     a2.set_title("P&L grows far slower than capital")
     save(fig, out / "08_capacity.png")
+
+
+def data_periods(R: Path, out: Path) -> None:
+    """Which data each stage saw: warm-up, step-4 exploration, walk-forward folds, paper trading."""
+    T = pd.Timestamp
+    start, end = T("2021-06-01"), T("2026-10-23")
+    folds = pd.read_csv(R / "walkforward_intraday_expiry" / "folds.csv")
+    o = pd.read_csv(R / "walkforward_intraday_expiry" / "oos_trades.csv", parse_dates=["date"])
+    rows = []                                        # (label, [(from, to, colour, hatch, text)])
+    rows.append(("data", [(T("2020-06-01"), start, GREY, "//", "basket prices only:\n120-session fit warm-up"),
+                          (start, T("2023-01-03"), BLUE, "", "minute basis + ticks + book prices"),
+                          (T("2023-01-03"), end, BLUE, "", "… + book sizes (capacity)")]))
+    rows.append(("step 4: in-sample\nexploration", [(start, end, GREY, "", "whole sample: buffer 3 found here, so steps 5–6 re-pick it")]))
+    for f in folds.itertuples():
+        y0 = T(f"{f.test_year}-01-01")
+        y1 = min(T(f"{f.test_year}-12-31"), end)
+        is_txt = (f"in-sample: {f.train_n} trades → buffer {f.buffer:g}" if (y0 - start).days > 400
+                  else f"IS: {f.train_n} →\nbuffer {f.buffer:g}")
+        rows.append((f"fold {f.test_year}", [(start, y0, BLUE, "", is_txt),
+                                              (y0, y1, GREEN, "", f"OOS: {f.test_n}, {f.test_total:+.0f}")]))
+    rows.append(("rule revision\n(5 s, to expiry)", [(T("2022-01-01"), end, ORANGE, "//",
+                                                      "chosen after seeing 2022–2026 → these years acted as validation")]))
+    rows.append(("step 7: paper\ntrading", [(T("2026-11-01"), T("2027-05-01"), "white", "", "clean OOS\n(not started)")]))
+
+    fig, ax = plt.subplots(figsize=(12, 5.4))
+    for i, (lab, bars) in enumerate(rows):
+        yy = len(rows) - 1 - i
+        for a, b, c, h, txt in bars:
+            ax.barh(yy, (b - a).days, left=a, height=0.6, color=c, alpha=0.85 if c != "white" else 1,
+                    hatch=h, edgecolor="black", lw=0.6, ls="--" if c == "white" else "-")
+            light = c in (GREY, "white") or h
+            ax.text(a + (b - a) / 2, yy, txt, ha="center", va="center", fontsize=7,
+                    color="black" if light else "white",
+                    bbox=dict(facecolor="white", edgecolor="none", pad=1.5) if h else None)
+        if lab.startswith("fold"):
+            d = o[o["year"] == int(lab.split()[1])]["date"]
+            ax.scatter(d, [yy + 0.36] * len(d), marker="v", s=14, color="black", zorder=3)
+    ax.set_yticks(range(len(rows)), [r[0] for r in rows][::-1], fontsize=8)
+    ax.set_xlim(T("2020-05-01"), T("2027-06-01"))
+    ax.axvline(end, color=RED, lw=1, ls=":")
+    ax.text(end, len(rows) - 1.5, "data end \n2026-10-23 ", color=RED, fontsize=7, ha="right", va="center")
+    ax.set_title("Data periods: anchored walk-forward (in-sample grows, each year tested once), ▼ = OOS entries")
+    ax.grid(axis="x", alpha=0.3)
+    save(fig, out / "09_data_periods.png")
 
 
 def main() -> None:
@@ -216,6 +264,7 @@ def main() -> None:
     buffer_grid(args.result, args.outdir)
     oos_trades(args.result, args.outdir)
     capacity(args.result, args.outdir)
+    data_periods(args.result, args.outdir)
 
 
 if __name__ == "__main__":

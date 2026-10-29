@@ -4,6 +4,22 @@ It tests a **cash-and-carry basis trade**: when the VN30 front-month future
 (`VN30F1M`) trades rich versus the VN30 index, buy a basket of stocks that tracks VN30
 and short the future, then hold until expiry, when the basis is forced to zero.
 
+## Data periods
+
+![data periods](figures/09_data_periods.png)
+
+| period | dates | used for |
+|---|---|---|
+| warm-up | 2020-06 → 2021-05 | basket prices only: the first 120-session fit of the hedge basket |
+| in-sample (step 4) | 2021-06-01 → 2026-10-23 | exploration on the whole sample; buffer 3 was found here |
+| in-sample (steps 5–6) | 2021-06-01 → the end of the year before each test year | anchored walk-forward: pick the buffer (and vol cap) with the best total net |
+| out-of-sample (steps 5–6) | each of 2022, 2023, 2024, 2025, 2026 (to 2026-10-23) | trade the test year with the pick; the five years are stitched into the OOS result |
+| validation (de facto) | 2022-01-01 → 2026-10-23 | the 5 s fill and entries up to expiry day were adopted after this period's OOS was seen |
+| clean out-of-sample | from 2026-11 (step 7, not started) | paper trading |
+
+There is no separate validation set: the walk-forward replaces it. Because the rule was
+revised after the 2022–2026 OOS had been seen, only paper trading gives a clean test.
+
 ## TL;DR
 
 | question | answer |
@@ -11,7 +27,7 @@ and short the future, then hold until expiry, when the basis is forced to zero.
 | Does the basis converge? | Yes, by construction: the future settles at the VN30 close on expiry day. |
 | Is the daily-close version tradeable? | **No.** It only made money when it filled at the same close that produced the signal. At the next 09:15 open the captured basis falls from 14.4 to 3.9 pts, and walk-forward OOS is −94 pts. |
 | Is the intraday version tradeable? | **At fund costs, yes, but it is small.** Adopted rule: 17 bps fees, 4.5% carry, a 3-pt buffer, a 5 s fill, entries allowed up to expiry day. Out of sample (2022–2026, 41 trades) the edge is **+2.05 pts/trade (t 10.6, 93% positive)**, net +5.89 (t 2.84). Buffer 3 is picked in every walk-forward fold. At retail fees (40 bps) it loses. |
-| How big? | The futures bid caps it at ~10–30 contracts per trade, and the rule trades ~8 times a year. At 10 contracts: **≈ 9m VND/yr on ≈ 2.4bn (≈ 0.4%/yr above carry)**; ≈ 33m on 24bn (0.14%) at 100. The capacity run used the earlier rule (≥ 7 days, ~4–5 trades a year), so these figures are a floor. |
+| How big? | The futures bid caps it at ~10–30 contracts per trade, and the rule trades ~8–9 times a year. At 10 contracts: **≈ 17m VND/yr on ≈ 2.5bn (≈ 0.7%/yr above carry)**; ≈ 75m on 25bn (0.3%) at 100. |
 | Biggest risk | The hedge basket drifting from VN30 until expiry: ±13 pts std per trade, ~6× the edge. It was positive in the sample (+3.8/trade), but that came from a few names (VHM, VCB, PLX), so it is treated as luck. Entries in the last week barely drift (±0.2 on average). |
 | Verdict | A real but tiny, capacity-bound edge. Not worth running as a standalone strategy. Step 7 (paper trading) only makes sense with the **official VN30 weights** for the basket. |
 
@@ -51,7 +67,7 @@ the capital gives up, and the basket not moving exactly like the index.
 | 3 Data processing | [Step 3](#step-3--data-processing-the-hedge-basket) | `tracking_error.py` → `result/tracking/` | done; official weights missing |
 | 4 In-sample backtest | [Step 4](#step-4--in-sample-backtest) | `basis_backtest.py`, `intraday_check.py` → `result/basis*/`, `result/intraday*/` | done |
 | 5 Optimization | [Step 5](#step-5--optimization) | `walk_forward.py`, `walk_forward_intraday.py` | done: one parameter (buffer) |
-| 6 Out-of-sample | [Step 6](#step-6--out-of-sample) | `walk_forward_intraday.py`, `capacity.py` → `result/walkforward_intraday*/`, `result/capacity/` | done: positive, capacity-bound |
+| 6 Out-of-sample | [Step 6](#step-6--out-of-sample) | `walk_forward_intraday.py`, `capacity.py` → `result/walkforward_intraday*/`, `result/capacity_5s/` | done: positive, capacity-bound |
 | 7 Paper trading | [Step 7](#steps-79--not-started) | — | not started |
 | 8–9 Live trading onward | [Steps 8–9](#steps-79--not-started) | — | not started |
 
@@ -154,27 +170,31 @@ closing basis is a closing-print dislocation that reverts overnight
 If the dislocation lasts minutes, not hours, the test must be intraday:
 
 1. every minute of continuous trading (09:16–11:29, 13:00–14:29), displayed basis and bar;
-2. a trigger is the first minute of a day with **displayed − bar ≥ buffer** and ≥ 7 days to expiry;
+2. a trigger is the first minute of a day with **displayed − bar ≥ buffer**, up to expiry day
+   (the first run required ≥ 7 days to expiry; see 6c);
 3. after a delay, fill at the real book: **sell the future at its best bid, buy each
    stock at its best ask** (quotes must be two-sided, uncrossed, within 3% of the last
    trade; ≥ 90% of basket weight quotable; the fill must land in continuous trading);
 4. hold to expiry, so the basis settles to 0.
 
 The bar now includes **carry**, which the daily backtest ignored. Where the displayed
-basis goes, at fund fees, buffer 3, 60 s:
+basis goes, at fund fees, buffer 3, 5 s:
 
 ![waterfall](figures/04_waterfall.png)
 
-Spreads cost ~1.7 pts and 60 s of delay ~0.6; the VN30 print is not stale on average.
-About **2.1 pts** of the on-screen basis is never yours, which is why the buffer has to
-exceed ~2.
+Spreads cost ~1.8 pts; 5 s of delay costs almost nothing (−0.07; 60 s would cost ~0.5), and
+the VN30 print is not stale on average. About **1.8 pts** of the on-screen basis is never
+yours, which is why the buffer has to exceed ~2.
 
-| fees | buffer | triggers | edge @ 60 s | t | edge > 0 |
-|---|---|---|---|---|---|
-| 40 bps (retail) | 0 | 86 | −1.73 | −5.9 | 17% |
-| 40 bps (retail) | 5 | 9 | +2.69 | +2.6 | 78% |
-| 17 bps (fund, assumed) | 0 | 245 | −1.04 | −8.0 | 23% |
-| 17 bps (fund, assumed) | 3 | 94 | **+1.73** | +10.1 | 89% |
+Every trigger day, entries up to expiry day (`result/intraday_fund_buffer{0,3}_expiry/`):
+
+| fees | buffer | triggers | edge @ 5 s | t | edge > 0 | edge @ 60 s |
+|---|---|---|---|---|---|---|
+| 17 bps (fund, assumed) | 0 | 448 | −0.70 | −8.6 | 22% | −1.05 |
+| 17 bps (fund, assumed) | 3 | 181 | **+2.18** | +19.0 | 96% | +1.73 |
+
+First run at retail fees (≥ 7 days to expiry, 60 s): buffer 0 −1.73 (t −5.9, 86 triggers),
+buffer 5 +2.69 (t +2.6, 9 triggers).
 
 ![edge vs delay](figures/05_edge_vs_delay.png)
 
@@ -323,21 +343,23 @@ margin reserve).
 
 ![capacity](figures/08_capacity.png)
 
+Adopted rule: 5 s fill, entries up to expiry day, the first trigger of each contract,
+34 contracts from 2023-01-03 to 2026-10-14 (`result/capacity_5s/`):
+
 | target contracts | avg filled | edge | P&L m VND/yr | capital | %/yr above carry |
 |---|---|---|---|---|---|
-| 10 | 8.8 | +2.11 | 9.4 | 2.4bn | 0.38% |
-| 20 | 16.2 | +2.04 | 16.7 | 4.9bn | 0.34% |
-| 50 | 28.8 | +1.93 | 28.1 | 12.2bn | 0.23% |
-| 100 | 34.1 | +1.94 | 33.4 | 24.4bn | 0.14% |
+| 10 | 9.2 | +2.07 | **17.1** | 2.5bn | **0.69%** |
+| 20 | 16.8 | +2.01 | 30.5 | 5.0bn | 0.61% |
+| 50 | 32.7 | +1.90 | 55.9 | 12.4bn | 0.45% |
+| 100 | 45.2 | +1.84 | 74.8 | 24.9bn | 0.30% |
 
-The futures bid runs out first (short in 36% of triggers at 50 contracts, 67% at 100).
-Trading every trigger day instead of once per contract raises VND P&L (30–120m/yr) but
-stacks positions, so capital rises ~10× and return falls to 0.06–0.11%/yr.
+The futures bid runs out first (short in 33% of triggers at 50 contracts, 62% at 100).
+Trading every trigger day instead of once per contract raises VND P&L (59–239m/yr) but
+stacks positions, so capital rises ~10× and return falls to 0.14–0.21%/yr.
 
-This run uses the first rule's triggers (≥ 7 days to expiry, 60 s). The adopted rule
-trades about twice as many contracts a year, and its late entries tie up capital for only
-a few days. So the P&L per year above is a floor. It was not re-run, because that needs
-the book depth of every new trigger from the DB.
+The first rule (≥ 7 days, 60 s, `result/capacity/`) made 9.4m/yr on 2.4bn (0.38%) at 10
+contracts. The adopted rule roughly doubles it: more contracts trade, and the edge at
+5 s is higher.
 
 ### Sensitivity to the cost of capital
 
@@ -363,7 +385,7 @@ Basis convergence is real, but the daily-close version is an artefact of the
 same-close fill. The intraday version earns **+2.05 pts per trade out of sample at fund
 costs** with a 5 s fill and entries up to expiry day, and a buffer chosen in advance. That
 is a genuine edge, but the futures book caps it at roughly 10–30 contracts and ~8 trades a
-year, a few tenths of a percent a year on the capital, with per-trade tracking noise six
+year, ≈ 0.3–0.7% a year on the capital above carry, with per-trade tracking noise six
 times larger. It is worth running only as
 a side book for a desk that already trades baskets with official weights. For an equity
 fund already long VN30 names, the same signal is better used as a rule to **short
@@ -400,7 +422,8 @@ python scripts/walk_forward.py --futures data/raw/vn30f_frontmonth.parquet \
 # step 4b (intraday; builds data/raw/intraday_basis_minute.parquet on first run)
 python scripts/intraday_check.py --futures data/raw/vn30f_frontmonth.parquet \
     --basket data/raw/vn30_basket_prices.parquet --membership data/raw/vn30_membership.parquet \
-    --fee-bps 17 --buffer 3 --sizes 1,10,50,100 --outdir result/intraday_fund_buffer3
+    --fee-bps 17 --buffer 3 --min-days-expiry 0 --delays 0,5,30,60,120 --sizes 1,10,50,100 \
+    --outdir result/intraday_fund_buffer3_expiry      # --buffer 0 → result/intraday_fund_buffer0_expiry
 
 # steps 5b–6 (intraday walk-forward, held to expiry)
 # fills cache per delay: data/raw/wfi_fills_delay{5,30,60}.parquet
@@ -414,7 +437,7 @@ python scripts/walk_forward_intraday.py --delay 5 --min-days-expiry 7 --outdir r
     # other variants: --late-vol-cap 25, --max-fut-spread 0.5
 
 # step 6c (capacity) and figures
-python scripts/capacity.py --events result/intraday_fund_buffer3/events.csv
+python scripts/capacity.py --events result/intraday_fund_buffer3_expiry/events.csv --delay 5 --outdir result/capacity_5s
 python scripts/make_figures.py
 ```
 
@@ -428,7 +451,7 @@ python scripts/make_figures.py
 | `result/intraday*/` | intraday capturability: `events.csv` (trigger × delay × size), summary, by year, by size |
 | `result/walkforward_intraday_expiry*/` | steps 5–6, adopted rule (entries up to expiry day) at 5 / 30 / 60 s, plus the 60 s 14:15 cut-off: `trades.csv` (every combo), `grid.csv`, `folds.csv`, `oos_trades.csv`, `FINDINGS.md` |
 | `result/walkforward_intraday{,_delay5,_delay30}/` | the first rule (≥ 7 days to expiry) at 60 / 5 / 30 s, same files |
-| `result/capacity/` | fills by size per trigger, P&L/capital by target |
+| `result/capacity_5s/` | fills by size per trigger, P&L/capital by target (adopted rule, 5 s); `result/capacity/` is the first rule at 60 s |
 | `figures/` | the README charts (`make_figures.py`) |
 
 ## Caveats
